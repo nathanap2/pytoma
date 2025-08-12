@@ -27,34 +27,34 @@ def _slugify(title: str) -> str:
 class MarkdownMinEngine:
     filetypes = {"md"}
 
-    def configure(self, roots: List[Path]) -> None:  # no-op (signature pour homogénéité)
+    def configure(self, roots: List[Path]) -> None:  # no-op (signature for consistency)
         return
 
     def parse(self, path: Path, text: str) -> Document:
         posix = PurePosixPath(path.as_posix())
         ls = _line_starts(text)
 
-        # Racine document
+        # Document root
         root = Node(
             kind=MD_DOC,
             path=posix,
             span=(0, len(text)),
             name=str(posix),
-            qual=str(posix),   # on peut cibler le doc entier via un match sur le chemin
+            qual=str(posix),   # we can target the entire document via a match on the path
             meta={},
             children=[]
         )
 
-        # Collecte des titres
+        # Heading collection
         headings: List[Tuple[int, int, int, str]] = []  # (level, line_idx, char_start, title)
         for m in _HEADING_RE.finditer(text):
             hashes = m.group(1)
             title = m.group(2).strip()
             level = len(hashes)
             char_start = m.start()
-            # convertir char_start en numéro de ligne (binaire sur ls)
-            # astuce: trouve la plus grande i tel que ls[i] <= char_start
-            # (recherche linéaire suffit pour un md; garder simple)
+            # convert char_start to line number (binary search on ls)
+            # trick: find the largest i such that ls[i] <= char_start
+            # (linear search is enough for markdown; keep it simple)
             line_idx = 0
             for i in range(len(ls)-1):
                 if ls[i] <= char_start < ls[i+1]:
@@ -62,7 +62,7 @@ class MarkdownMinEngine:
                     break
             headings.append((level, line_idx, char_start, title))
 
-        # Déterminer les spans de section : jusqu’au prochain titre de niveau <= courant
+        # Determine section spans: until the next heading with level <= current one
         nodes: List[Node] = []
         n = len(headings)
         for i, (lvl, line_idx, start_char, title) in enumerate(headings):
@@ -85,7 +85,7 @@ class MarkdownMinEngine:
             )
             nodes.append(node)
 
-        # Arbre plat (sections comme enfants de la racine)
+        # Flat tree (sections as children of the root)
         root.children.extend(nodes)
         assign_ids([root])
         flat = flatten([root])
@@ -101,7 +101,7 @@ class MarkdownMinEngine:
             if action.kind == "full":
                 continue
             if action.kind == "hide":
-                # hide sur la racine -> supprimer tout le doc
+                # hide on the root -> remove the entire document
                 if node.kind == MD_DOC:
                     candidates.append(Edit(path=doc.path, span=(0, len(doc.text)), replacement=""))
                 elif node.kind == MD_HEADING:

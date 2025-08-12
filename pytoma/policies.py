@@ -33,12 +33,13 @@ register_action("sig")
 register_action("levels", validator=lambda a: (
     isinstance(a.params.get("k"), int) or (_ for _ in ()).throw(ValueError("levels: k must be int"))
 ))
+register_action("file:no-imports")
 
 # -----------------------------
 # Modes (string) → Action
 # -----------------------------
 
-MODE_RE = re.compile(r"^(hide|sig|sig\+doc|full|body:levels=(\d+))$")
+MODE_RE = re.compile(r"^(hide|sig|sig\+doc|full|body:levels=(\d+)|file:no-imports)$")
 
 def validate_mode(mode: str) -> str:
     if not MODE_RE.match(mode):
@@ -54,9 +55,12 @@ def to_action(mode: str) -> Action:
     if mode == "full":     return full()
     if mode == "sig":      return sig()
     if mode == "sig+doc":  return sig_doc()
+    if mode == "file:no-imports": return Action("file:no-imports")
     m = re.match(r"body:levels=(\d+)", mode)
     if m:
         return levels(int(m.group(1)))
     # should be unreachable thanks to validate_mode
     return full()
+
+
 

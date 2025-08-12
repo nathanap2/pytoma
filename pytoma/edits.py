@@ -45,17 +45,6 @@ def _apply_edits_to_text(text: str, edits: List[Edit]) -> str:
         last_end = s
     return out
 
-def apply_edits_in_place(edits: Iterable[Edit]) -> None:
-    from collections import defaultdict
-    by_path: Dict[Path, List[Edit]] = defaultdict(list)
-    for e in merge_edits(list(edits)):
-        by_path[Path(e.path)].append(e)
-
-    for path, group in by_path.items():
-        text = path.read_text(encoding="utf-8")
-        new = _apply_edits_to_text(text, group)
-        path.write_text(new, encoding="utf-8")
-
 def apply_edits_preview(edits: Iterable[Edit]) -> Dict[Path, str]:
     from collections import defaultdict
     previews: Dict[Path, str] = {}

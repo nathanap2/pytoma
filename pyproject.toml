@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.9"
 authors = [{name="Nathan Palluau", email="nathan.palluau@gmail.com"}]
 license = {text = "MIT"}
-classifiers = ["Development Status :: 3 - Alpha"]
 
 [project.urls]
 Homepage = "https://github.com/nathanap2/pytoma"

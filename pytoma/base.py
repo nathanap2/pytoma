@@ -7,7 +7,7 @@ from .policies import Action, validate_action
 
 class Engine(Protocol):
     """One engine per file type (detected via extension)."""
-    filetypes: set[str]  # ex. {"py"} ou {"md"} ou {"yaml","yml","toml"}
+    filetypes: set[str]  # e.g., {"py"} or {"md"} or {"yaml","yml","toml"}
 
     def parse(self, path: Path, text: str) -> Document:
         """Build the Document + Nodes (a lightweight tree)."""

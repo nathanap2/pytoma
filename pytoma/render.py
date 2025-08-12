@@ -1,7 +1,8 @@
-from typing import Callable, List, Tuple, Optional
+from typing import Callable, List, Optional, Tuple
 import re
 
 from .collect import FuncInfo
+from .markers import make_omission_line, DEFAULT_OPTIONS
 
 RenderFn = Callable[[FuncInfo, List[str]], str]
 
@@ -129,9 +130,22 @@ def slice_with_levels(src: List[str], start: int, end: int, keep_levels: int) ->
 # ---------------------------------------------------------------------------
 
 def _sig_block(fi: FuncInfo, src: List[str]) -> str:
-    # One-line signature + minimal body
+    # One-line signature + omission marker (instead of "...")
     h = header_one_line(fi, src)
     indent = _line_indent(h)
+    rng = compute_body_range(fi)
+    if rng:
+        a, b = rng
+        marker = make_omission_line(
+            lang="py",
+            a=a,
+            b=b,
+            indent=indent + "    ",
+            opts=DEFAULT_OPTIONS,
+            label="body omitted",
+        )
+        return h + marker
+    # Fallback if body cannot be computed
     return h + f"{indent}    ...\n"
 
 def _sigdoc_block(fi: FuncInfo, src: List[str]) -> str:
@@ -142,7 +156,21 @@ def _sigdoc_block(fi: FuncInfo, src: List[str]) -> str:
         parts.append(_ensure_trailing_nl(fi.docstring))
     else:
         parts.append(f'{indent}    """…"""\n')
-    parts.append(f"{indent}    ...\n")
+    rng = compute_body_range(fi)
+    if rng:
+        a, b = rng
+        parts.append(
+            make_omission_line(
+                lang="py",
+                a=a,
+                b=b,
+                indent=indent + "    ",
+                opts=DEFAULT_OPTIONS,
+                label="body omitted",
+            )
+        )
+    else:
+        parts.append(f"{indent}    ...\n")
     return "".join(parts)
 
 def _levels_block(fi: FuncInfo, src: List[str], keep_levels: int) -> str:
@@ -157,9 +185,16 @@ def _levels_block(fi: FuncInfo, src: List[str], keep_levels: int) -> str:
     parts.extend(kept)
     base_indent = _line_indent(src[rng[0] - 1]) + " " * 4
     for (a, b) in omitted:
-        parts.append(f"{base_indent}# … lines {a}–{b} omitted …\n")
-    if parts and not parts[-1].endswith("\n"):
-        parts[-1] += "\n"
+        parts.append(
+            make_omission_line(
+                lang="py",
+                a=a,
+                b=b,
+                indent=base_indent,
+                opts=DEFAULT_OPTIONS,
+                label="omitted",
+            )
+        )
     return "".join(parts)
 
 def _replacement_for_mode(mode: str, fi: FuncInfo, src: List[str]) -> Optional[Tuple[int, int, str]]:

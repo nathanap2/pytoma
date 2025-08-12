@@ -11,7 +11,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     cfg = Config.load(args.config, args.default)
-    text = build_prompt([p.resolve() for p in args.paths], cfg, verbose=args.verbose)
+    text = build_prompt([p.resolve() for p in args.paths], cfg)
 
     if args.out:
         args.out.write_text(text, encoding="utf-8")

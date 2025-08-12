@@ -3,7 +3,7 @@ from pathlib import PurePosixPath
 from typing import Optional, List, Tuple, Dict, Iterable
 import hashlib
 
-Span = Tuple[int, int]  # [start, end) en indices de caractères
+Span = Tuple[int, int]  # [start, end) in character indices
 
 PY_MODULE   = "py:module"
 PY_CLASS    = "py:class"
@@ -13,7 +13,12 @@ PY_METHOD   = "py:method"
 # Markdown
 MD_DOC      = "md:doc"
 MD_HEADING  = "md:heading"
-# (futurs) YAML_KEY = "yaml:key", TOML_TABLE = "toml:table", ...
+
+# Toml
+TOML_DOC    = "toml:doc"
+TOML_TABLE  = "toml:table"
+
+# WIP ... YAML_KEY = "yaml:key", ...
 
 def compute_node_id(path: PurePosixPath, kind: str, qual: Optional[str], span: Span) -> str:
     h = hashlib.sha1()

@@ -1,4 +1,3 @@
-# pytoma/engines/python_min.py
 from pathlib import Path, PurePosixPath
 from typing import List, Tuple, Dict, Optional
 
@@ -10,7 +9,8 @@ from libcst import metadata
 from ..ir import Document, Node, Edit, Span, PY_MODULE, PY_CLASS, PY_FUNCTION, PY_METHOD
 from ..policies import Action
 from ..base import register_engine
-from ..render import _replacement_for_mode  # rendu Python existant
+from ..render import _replacement_for_mode  # existing Python rendering
+from ..markers import make_omission_line, DEFAULT_OPTIONS
 from ..collect import FuncCollector, FuncInfo, file_to_module_name
 from ..ir import assign_ids, flatten
 
@@ -58,7 +58,7 @@ def _visibility(name: str) -> str:
     return "public"
 
 def _decorator_to_str_py(fn_dec: cst.Decorator) -> str:
-    # Rendu best-effort (sans les arguments si appel complexe)
+    # Best-effort rendering (without arguments if complex call)
     expr = fn_dec.decorator
     def _name(e: cst.CSTNode) -> Optional[str]:
         if isinstance(e, cst.Name):
@@ -71,12 +71,32 @@ def _decorator_to_str_py(fn_dec: cst.Decorator) -> str:
         return None
     return _name(expr) or "decorator"
 
+def _drop_top_level_imports(text: str, path: PurePosixPath) -> List[Edit]:
+    """
+    Remove Import/ImportFrom statements at the module level.
+    Keep 'from __future__ import ...'.
+    """
+    ls = _line_starts(text)
+    edits: List[Edit] = []
+    try:
+        t = ast.parse(text)
+    except SyntaxError:
+        return edits
+    for n in getattr(t, "body", []):
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            if isinstance(n, ast.ImportFrom) and n.module == "__future__":
+                continue
+            s = ls[n.lineno - 1]
+            e = ls[n.end_lineno]
+            edits.append(Edit(path=path, span=(s, e), replacement=""))
+    return edits
+
 # ---------------------------
 # Classes (via ast) → (qual, span, parent, decorators)
 # ---------------------------
 
 class _ClassVisitor(ast.NodeVisitor):
-    """Collecte les classes (imbriquées) avec qualnames et décorateurs."""
+    """Collect nested classes with qualnames and decorators."""
     def __init__(self, text: str) -> None:
         self.text = text
         self.stack: List[str] = []
@@ -93,7 +113,7 @@ class _ClassVisitor(ast.NodeVisitor):
         end = self._ls[end_ln - 1] + end_col
         qual_local = ".".join(self.stack + [node.name]) if self.stack else node.name
         parent_local = ".".join(self.stack) if self.stack else None
-        # décorateurs via ast.unparse (py>=3.9)
+        # decorators via ast.unparse (py>=3.9)
         decos = []
         for d in getattr(node, "decorator_list", []):
             try:
@@ -142,7 +162,7 @@ def _mode_of_action(a: Action) -> str | None:
 
 class PythonMinEngine:
     """
-    Granularité fonction/méthode, désormais en arbre (module → classes → defs).
+    Function/method granularity, now as a tree (module → classes → defs).
     """
     filetypes = {"py"}
 
@@ -159,7 +179,7 @@ class PythonMinEngine:
         ls = _line_starts(text)
         module_name = _module_name(path)
 
-        # Racine module
+        # Module root
         root = Node(
             kind=PY_MODULE,
             path=posix,
@@ -170,14 +190,14 @@ class PythonMinEngine:
             children=[]
         )
 
-        # --- Classes (avec imbrication) ---
+        # --- Classes (with nesting) ---
         cls_nodes: Dict[str, Node] = {}
         try:
             t_ast = ast.parse(text)
             cv = _ClassVisitor(text)
             cv.visit(t_ast)
             for item in cv.items:
-                qual_local = item["qual_local"]  # ex: "Outer.Inner"
+                qual_local = item["qual_local"]  # e.g., "Outer.Inner"
                 parent_local = item["parent_local"]
                 name = item["name"]
                 span = item["span"]
@@ -203,31 +223,31 @@ class PythonMinEngine:
         except SyntaxError:
             pass
 
-        # --- Fonctions & méthodes (inclut defs imbriquées) ---
+        # --- Functions & methods (including nested defs) ---
         fn_nodes: Dict[str, Node] = {}  # local qual ("f", "Cls.m", "f.inner") -> Node
         for fi in funcs:
-            # Span (inclut décorateurs)
+            # Span (includes decorators)
             s = ls[fi.deco_start_line - 1]
             e = ls[fi.end[0] - 1] + fi.end[1]
-            local = fi.qualname.split(":", 1)[1]   # "func" ou "Class.meth" ou "outer.inner"
+            local = fi.qualname.split(":", 1)[1]   # "func" or "Class.meth" or "outer.inner"
             parts = local.split(".")
             name = parts[-1]
             parent_local = ".".join(parts[:-1]) if len(parts) > 1 else None
 
-            # Détecte décorateurs (best-effort textuel)
+            # Detect decorators (best-effort textual)
             decos: List[str] = []
             if fi.node.decorators:
                 for d in fi.node.decorators:
                     decos.append(_decorator_to_str_py(d))
 
-            # Type (méthode si parent est une classe)
+            # Type (method if parent is a class)
             parent: Optional[Node] = None
             kind = PY_FUNCTION
             if parent_local and parent_local in cls_nodes:
                 parent = cls_nodes[parent_local]
                 kind = PY_METHOD
             elif parent_local and parent_local in fn_nodes:
-                parent = fn_nodes[parent_local]  # def imbriquée
+                parent = fn_nodes[parent_local]  # nested def
             else:
                 parent = root
 
@@ -247,38 +267,63 @@ class PythonMinEngine:
             parent.children.append(n)
             fn_nodes[local] = n
 
-        # IDs + liste plate
+        # IDs + flat list
         assign_ids([root])
         flat = flatten([root])
 
         return Document(path=posix, text=text, roots=[root], nodes=flat)
 
     def supports(self, action: Action) -> bool:
-        return _mode_of_action(action) in {"full", "hide", "sig", "sig+doc"} or action.kind == "levels"
-
+        return (
+            _mode_of_action(action) in {"full", "hide", "sig", "sig+doc"}
+            or action.kind == "levels"
+            or action.kind in {"file:no-imports"}
+        )
     def render(self, doc: Document, decisions: List[Tuple[Node, Action]]) -> List[Edit]:
-        # Rendu inchangé : on se base sur FuncInfo (plus robuste pour les remplacements)
+        # Unchanged rendering: based on FuncInfo (more robust for replacements)
         src, funcs = _collect_funcs(doc.text, Path(doc.path))
         ls = _line_starts(doc.text)
         by_qual: Dict[str, FuncInfo] = { fi.qualname: fi for fi in funcs }
 
         candidates: List[Edit] = []
         for node, action in decisions:
+            # --- file-level filters ---
+            if node.kind == PY_MODULE and action.kind == "file:no-imports":
+                candidates.extend(_drop_top_level_imports(doc.text, doc.path))
+                continue
+
             mode = _mode_of_action(action)
             if not mode or mode == "full":
                 continue
             if node.kind == PY_MODULE and mode == "hide":
-                candidates.append(Edit(path=doc.path, span=(0, len(doc.text)), replacement=""))
+                # Mark omission of the entire module
+                marker = make_omission_line("py", 1, doc.text.count("\n")+1, indent="", opts=DEFAULT_OPTIONS, label="module omitted")
+                candidates.append(Edit(path=doc.path, span=(0, len(doc.text)), replacement=marker))
                 continue
             if node.kind == PY_CLASS:
                 if mode == "hide":
-                    candidates.append(Edit(path=doc.path, span=node.span, replacement=""))
+                    # Compute the line range of the class
+                    s, t = node.span
+                    before = doc.text[:s]
+                    omitted_text = doc.text[s:t]
+                    start_line = before.count("\n") + 1
+                    end_line = start_line + omitted_text.count("\n")
+                    indent = ""  # could be refined by reusing the indent of the first line
+                    marker = make_omission_line("py", start_line, end_line, indent=indent, opts=DEFAULT_OPTIONS, label=f"class {node.name} omitted" if node.name else "class omitted")
+                    candidates.append(Edit(path=doc.path, span=node.span, replacement=marker))
                 continue
             if node.kind in {PY_FUNCTION, PY_METHOD}:
                 fi = by_qual.get(node.qual or "")
                 if not fi:
                     if mode == "hide":
-                        candidates.append(Edit(path=doc.path, span=node.span, replacement=""))
+                        s, t = node.span
+                        before = doc.text[:s]
+                        omitted_text = doc.text[s:t]
+                        start_line = before.count("\n") + 1
+                        end_line = start_line + omitted_text.count("\n")
+                        indent = ""
+                        marker = make_omission_line("py", start_line, end_line, indent=indent, opts=DEFAULT_OPTIONS, label="definition omitted")
+                        candidates.append(Edit(path=doc.path, span=node.span, replacement=marker))
                     continue
                 rep = _replacement_for_mode(mode, fi, src)
                 if not rep:
@@ -287,7 +332,7 @@ class PythonMinEngine:
                 span = _line_span_to_char_span(ls, a_ln, b_ln)
                 candidates.append(Edit(path=doc.path, span=span, replacement=block))
 
-        # Aucune déduplication/pruning ici : on délègue à fs.merge_edits
+        # No deduplication/pruning here: delegate to fs.merge_edits
         return candidates
 
 # registration
