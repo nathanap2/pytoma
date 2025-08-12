@@ -1,0 +1,74 @@
+# tests/test_edits_merge.py
+import pytest
+from pathlib import PurePosixPath
+from pytoma.ir import Edit
+from pytoma.edits import merge_edits, apply_edits_preview
+
+def _E(path, span, repl):
+    return Edit(path=PurePosixPath(path), span=span, replacement=repl)
+
+def test_nested_edits_outer_wins_merge():
+    edits = [
+        _E("a.py", (0, 100), "OUT"),
+        _E("a.py", (10, 20), "INNER"),
+        _E("a.py", (30, 40), "INNER2"),
+    ]
+    merged = merge_edits(edits)
+    # seul l'outer reste
+    assert len(merged) == 1
+    assert merged[0].span == (0, 100)
+    assert merged[0].replacement == "OUT"
+
+def test_partial_overlap_raises():
+    edits = [
+        _E("a.py", (0, 50), "A"),
+        _E("a.py", (40, 80), "B"),
+    ]
+    with pytest.raises(ValueError):
+        merge_edits(edits)
+
+def test_disjoint_edits_apply_preview():
+    text = "0123456789abcdefghij"
+    edits = [
+        _E("a.txt", (2, 4), "XX"),    # remplace "23" -> "0 1 XX 4 ..."
+        _E("a.txt", (10, 12), "YY"),  # remplace "ab" -> "... 9 YY c ..."
+    ]
+    # apply_edits_preview doit appeler merge_edits en interne
+    # on écrit un fichier virtuel ? Ici on simule: on va monkeypatcher la lecture.
+    # Pour rester simple et sans I/O, on teste merge + _apply_edits_to_text indirectement
+    # en créant un mini helper local (ou bien tu peux créer un test d'intégration avec tmp_path).
+
+def test_apply_preview_with_tmp_path(tmp_path):
+    p = tmp_path / "a.txt"
+    p.write_text("0123456789abcdefghij", encoding="utf-8")
+    edits = [
+        _E(p.as_posix(), (2, 4), "XX"),
+        _E(p.as_posix(), (10, 12), "YY"),
+    ]
+    out = apply_edits_preview(edits)
+    assert p in out
+    assert out[p] == "01XX456789YYcdefghij"
+
+def test_merge_is_per_file():
+    edits = [
+        _E("a.py", (0, 10), "A"),
+        _E("b.py", (0, 10), "B"),
+        _E("a.py", (2, 5), "INNER"),  # nested dans a.py -> supprimé par merge
+    ]
+    merged = merge_edits(edits)
+    # a.py outer only + b.py unique
+    assert { (e.path.as_posix(), e.span) for e in merged } == {
+        ("a.py", (0, 10)),
+        ("b.py", (0, 10)),
+    }
+
+def test_apply_preview_rejects_partial_overlap(tmp_path):
+    p = tmp_path / "a.py"
+    p.write_text("abcdefghij", encoding="utf-8")
+    edits = [
+        _E(p.as_posix(), (0, 6), "X"),
+        _E(p.as_posix(), (4, 9), "Y"),  # chevauchement partiel
+    ]
+    with pytest.raises(ValueError):
+        apply_edits_preview(edits)
+
