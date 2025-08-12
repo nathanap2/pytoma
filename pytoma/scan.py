@@ -2,6 +2,7 @@ import fnmatch
 from pathlib import Path, PurePosixPath
 from typing import Iterable, Iterator
 
+
 def iter_files(
     roots: Iterable[Path],
     includes: Iterable[str] = ("**/*",),
@@ -23,4 +24,3 @@ def iter_files(
                 if any(fnmatch.fnmatch(rel, pat) for pat in excludes):
                     continue
                 yield p
-

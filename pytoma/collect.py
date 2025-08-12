@@ -4,19 +4,21 @@ import pathlib
 import libcst as cst
 from libcst import metadata
 
+
 @dataclass
 class FuncInfo:
     """
     Collected information about a single Python function or method.
     The line numbers are 1-based and inclusive where specified.
     """
+
     module: str
     qualname: str
-    start: Tuple[int,int]
-    end: Tuple[int,int]
+    start: Tuple[int, int]
+    end: Tuple[int, int]
     node: cst.FunctionDef
     docstring: Optional[str]
-    doc_range: Optional[Tuple[int,int]]   # [start_line, end_line]
+    doc_range: Optional[Tuple[int, int]]  # [start_line, end_line]
     body_first_line: Optional[int]
     deco_start_line: int
 
@@ -42,7 +44,7 @@ class FuncCollector(cst.CSTVisitor):
         self.func_stack.append(fn.name.value)
         p = self.posmap[fn]
         start = (p.start.line, p.start.column)
-        end   = (p.end.line,   p.end.column)
+        end = (p.end.line, p.end.column)
 
         if fn.decorators:
             deco_start_line = min(self.posmap[d].start.line for d in fn.decorators)
@@ -69,11 +71,11 @@ class FuncCollector(cst.CSTVisitor):
                 ds_start, ds_end = ds.start.line, ds.end.line
                 doc_range = (ds_start, ds_end)
                 # exact slice from original source (keeps quotes intact)
-                docstring = "".join(self.source_lines[ds_start-1:ds_end])
+                docstring = "".join(self.source_lines[ds_start - 1 : ds_end])
 
         parts = self.class_stack + self.func_stack
         local = ".".join(parts) if parts else fn.name.value  # hierarchical qualname
-        qual  = f"{self.module_name}:{local}"
+        qual = f"{self.module_name}:{local}"
 
         self.funcs.append(
             FuncInfo(
@@ -92,6 +94,7 @@ class FuncCollector(cst.CSTVisitor):
     def leave_FunctionDef(self, fn: cst.FunctionDef) -> None:
         self.func_stack.pop()
 
+
 def file_to_module_name(path: pathlib.Path, root: pathlib.Path) -> str:
     """
     Convert a filesystem path to a dotted Python module name relative to 'root'.
@@ -108,4 +111,3 @@ def file_to_module_name(path: pathlib.Path, root: pathlib.Path) -> str:
     if parts and parts[-1] == "__init__":
         parts = parts[:-1]
     return ".".join(p for p in parts if p)
-

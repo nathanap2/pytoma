@@ -21,7 +21,6 @@ def _collect_funcs(code: str, modname: str = "m"):
     return collector.funcs
 
 
-
 def test_hierarchical_qualnames_for_nested_and_methods():
     """
     The collector should emit hierarchical qualnames:
@@ -60,4 +59,3 @@ def test_hierarchical_qualnames_for_nested_and_methods():
 
     # Sanity check: every qualname should be prefixed by module:
     assert all(name.startswith("m:") for name in qnames)
-

@@ -7,7 +7,8 @@ from ..ir import Document, Node, Edit, MD_DOC, MD_HEADING, assign_ids, flatten
 from ..policies import Action
 from ..base import register_engine
 
-_HEADING_RE = re.compile(r'^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$', re.MULTILINE)
+_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$", re.MULTILINE)
+
 
 def _line_starts(text: str) -> List[int]:
     starts = [0]
@@ -17,12 +18,14 @@ def _line_starts(text: str) -> List[int]:
         starts.append(acc)
     return starts
 
+
 def _slugify(title: str) -> str:
     s = unicodedata.normalize("NFKD", title)
     s = "".join(ch for ch in s if not unicodedata.combining(ch))
     s = s.lower()
     s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
     return s or "section"
+
 
 class MarkdownMinEngine:
     filetypes = {"md"}
@@ -40,13 +43,17 @@ class MarkdownMinEngine:
             path=posix,
             span=(0, len(text)),
             name=str(posix),
-            qual=str(posix),   # we can target the entire document via a match on the path
+            qual=str(
+                posix
+            ),  # we can target the entire document via a match on the path
             meta={},
-            children=[]
+            children=[],
         )
 
         # Heading collection
-        headings: List[Tuple[int, int, int, str]] = []  # (level, line_idx, char_start, title)
+        headings: List[
+            Tuple[int, int, int, str]
+        ] = []  # (level, line_idx, char_start, title)
         for m in _HEADING_RE.finditer(text):
             hashes = m.group(1)
             title = m.group(2).strip()
@@ -56,8 +63,8 @@ class MarkdownMinEngine:
             # trick: find the largest i such that ls[i] <= char_start
             # (linear search is enough for markdown; keep it simple)
             line_idx = 0
-            for i in range(len(ls)-1):
-                if ls[i] <= char_start < ls[i+1]:
+            for i in range(len(ls) - 1):
+                if ls[i] <= char_start < ls[i + 1]:
                     line_idx = i + 1  # 1-based
                     break
             headings.append((level, line_idx, char_start, title))
@@ -67,7 +74,7 @@ class MarkdownMinEngine:
         n = len(headings)
         for i, (lvl, line_idx, start_char, title) in enumerate(headings):
             end_char = len(text)
-            for j in range(i+1, n):
+            for j in range(i + 1, n):
                 nxt_lvl, _, nxt_start_char, _ = headings[j]
                 if nxt_lvl <= lvl:
                     end_char = nxt_start_char
@@ -81,7 +88,7 @@ class MarkdownMinEngine:
                 name=title,
                 qual=qual,
                 meta={"level": lvl, "slug": slug},
-                children=[]
+                children=[],
             )
             nodes.append(node)
 
@@ -103,10 +110,14 @@ class MarkdownMinEngine:
             if action.kind == "hide":
                 # hide on the root -> remove the entire document
                 if node.kind == MD_DOC:
-                    candidates.append(Edit(path=doc.path, span=(0, len(doc.text)), replacement=""))
+                    candidates.append(
+                        Edit(path=doc.path, span=(0, len(doc.text)), replacement="")
+                    )
                 elif node.kind == MD_HEADING:
-                    candidates.append(Edit(path=doc.path, span=node.span, replacement=""))
+                    candidates.append(
+                        Edit(path=doc.path, span=node.span, replacement="")
+                    )
         return candidates
 
-register_engine(MarkdownMinEngine())
 
+register_engine(MarkdownMinEngine())

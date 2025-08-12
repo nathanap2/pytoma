@@ -4,6 +4,7 @@ import textwrap
 import re
 import pytest
 
+
 def _write(p: pathlib.Path, s: str):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(textwrap.dedent(s).lstrip("\n"), encoding="utf-8")
@@ -27,14 +28,18 @@ def test_pre_resolve_reorders_literal_hide_before_glob_file():
     )
 
     # Must exist on the core side (per the proposed patch)
-    assert hasattr(core, "pre_resolve_path_rules"), "core.pre_resolve_path_rules is missing"
+    assert hasattr(
+        core, "pre_resolve_path_rules"
+    ), "core.pre_resolve_path_rules is missing"
     cfg2, warns = core.pre_resolve_path_rules(cfg)
 
     # In cfg2, 'hide' (literal) must precede 'file:no-imports' (glob)
     rules_str = [(r.match, r.mode) for r in (cfg2.rules or [])]
     pos_hide = rules_str.index(("pytoma/engines/toml_min.py", "hide"))
     pos_glob = rules_str.index(("pytoma/**/*.py", "file:no-imports"))
-    assert pos_hide < pos_glob, f"Expected literal 'hide' before glob 'file:no-imports'; got {rules_str}"
+    assert (
+        pos_hide < pos_glob
+    ), f"Expected literal 'hide' before glob 'file:no-imports'; got {rules_str}"
 
     # Optional: a useful warning may be emitted
     # (don't make the test brittle on this)
@@ -55,26 +60,34 @@ def test_end_to_end_no_overlap_after_preresolve(tmp_path: pathlib.Path):
     root = tmp_path / "proj"
     # --- sources ---
     toml_min = root / "pytoma" / "engines" / "toml_min.py"
-    _write(toml_min, """
+    _write(
+        toml_min,
+        """
         import os
         from math import sqrt
 
         def impl(x):
             # tiny body
             return sqrt(x) + (os.name == "posix")
-    """)
+    """,
+    )
 
     tests_py = root / "tests" / "t.py"
-    _write(tests_py, """
+    _write(
+        tests_py,
+        """
         import os
         from math import sqrt
 
         def g(y):
             return sqrt(y) + 1
-    """)
+    """,
+    )
 
     pyproject = root / "pyproject.toml"
-    _write(pyproject, """
+    _write(
+        pyproject,
+        """
         [project]
         name = "demo"
         version = "0.1.0"
@@ -82,7 +95,8 @@ def test_end_to_end_no_overlap_after_preresolve(tmp_path: pathlib.Path):
         [project.urls]
         homepage = "https://example.com"
         source = "https://example.com/src"
-    """)
+    """,
+    )
 
     # --- config (intentionally problematic order) ---
     cfg = core.Config(
@@ -99,7 +113,9 @@ def test_end_to_end_no_overlap_after_preresolve(tmp_path: pathlib.Path):
     )
 
     # Pre-resolution: produces a re-ordered cfg
-    assert hasattr(core, "pre_resolve_path_rules"), "core.pre_resolve_path_rules is missing"
+    assert hasattr(
+        core, "pre_resolve_path_rules"
+    ), "core.pre_resolve_path_rules is missing"
     cfg2, _ = core.pre_resolve_path_rules(cfg)
 
     # Build: MUST NOT raise (overlaps resolved)
@@ -130,4 +146,3 @@ def test_end_to_end_no_overlap_after_preresolve(tmp_path: pathlib.Path):
     # 3) TOML: [project.urls] hidden, [project] visible
     assert "[project]" in pack
     assert "table [project.urls] omitted" in pack
-

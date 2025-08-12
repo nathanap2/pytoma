@@ -5,6 +5,7 @@ from typing import Dict, Iterable, List
 
 from .ir import Edit
 
+
 def merge_edits(edits: Iterable[Edit]) -> List[Edit]:
     """
     Policy: outermost wins for nested overlaps; partial overlap -> ValueError.
@@ -33,6 +34,7 @@ def merge_edits(edits: Iterable[Edit]) -> List[Edit]:
         merged_all.extend(kept)
     return merged_all
 
+
 def _apply_edits_to_text(text: str, edits: List[Edit]) -> str:
     ordered = sorted(edits, key=lambda e: e.span[0], reverse=True)
     out = text
@@ -45,8 +47,10 @@ def _apply_edits_to_text(text: str, edits: List[Edit]) -> str:
         last_end = s
     return out
 
+
 def apply_edits_preview(edits: Iterable[Edit]) -> Dict[Path, str]:
     from collections import defaultdict
+
     previews: Dict[Path, str] = {}
     by_path: Dict[Path, List[Edit]] = defaultdict(list)
     for e in merge_edits(list(edits)):
@@ -56,4 +60,3 @@ def apply_edits_preview(edits: Iterable[Edit]) -> Dict[Path, str]:
         text = path.read_text(encoding="utf-8")
         previews[path] = _apply_edits_to_text(text, group)
     return previews
-

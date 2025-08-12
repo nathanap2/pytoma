@@ -9,10 +9,11 @@ from ..ir import Node, Document, assign_ids, flatten, Edit, TOML_DOC, TOML_TABLE
 from ..markers import make_omission_line, DEFAULT_OPTIONS
 
 # Tables et arrays-of-tables (en-têtes seulement).
-_TBL_RE      = re.compile(r'(?m)^[ \t]*\[(?P<name>[^\[\]\n]+)\][ \t]*(?:#.*)?$')
-_TBLARR_RE   = re.compile(r'(?m)^[ \t]*\[\[(?P<name>[^\[\]\n]+)\]\][ \t]*(?:#.*)?$')
-_COMMENT_RE  = re.compile(r'^[ \t]*#')
-_WHITESPACE  = re.compile(r'^[ \t]*$')
+_TBL_RE = re.compile(r"(?m)^[ \t]*\[(?P<name>[^\[\]\n]+)\][ \t]*(?:#.*)?$")
+_TBLARR_RE = re.compile(r"(?m)^[ \t]*\[\[(?P<name>[^\[\]\n]+)\]\][ \t]*(?:#.*)?$")
+_COMMENT_RE = re.compile(r"^[ \t]*#")
+_WHITESPACE = re.compile(r"^[ \t]*$")
+
 
 def _line_starts(text: str) -> List[int]:
     starts = [0]
@@ -22,21 +23,24 @@ def _line_starts(text: str) -> List[int]:
         starts.append(acc)
     return starts
 
+
 def _has_substantive_text(block: str) -> bool:
     """Vrai si 'block' contient autre chose que du vide ou des commentaires."""
     for ln in block.splitlines():
-        if _WHITESPACE.match(ln): 
+        if _WHITESPACE.match(ln):
             continue
         if _COMMENT_RE.match(ln):
             continue
         return True
     return False
 
+
 class TomlMinEngine:
     """
     Granularité: document complet + sections par [table] / [[array-of-table]].
     Actions supportées: 'full' et 'hide'.
     """
+
     filetypes = {"toml"}
 
     def configure(self, roots: List[Path]) -> None:  # signature homogène
@@ -54,7 +58,7 @@ class TomlMinEngine:
             name=str(posix),
             qual=str(posix),
             meta={},
-            children=[]
+            children=[],
         )
 
         # Collecte des en-têtes (tables + arrays)
@@ -71,30 +75,34 @@ class TomlMinEngine:
         first_start = hits[0][0] if hits else len(text)
         prefix = text[:first_start]
         if _has_substantive_text(prefix):
-            nodes.append(Node(
-                kind=TOML_TABLE,
-                path=posix,
-                span=(0, first_start),
-                name="(root)",
-                qual=f"{posix}:(root)",
-                meta={"type": "root"},
-                children=[]
-            ))
+            nodes.append(
+                Node(
+                    kind=TOML_TABLE,
+                    path=posix,
+                    span=(0, first_start),
+                    name="(root)",
+                    qual=f"{posix}:(root)",
+                    meta={"type": "root"},
+                    children=[],
+                )
+            )
 
         # Sections: chaque table jusqu'à la suivante
         n = len(hits)
         for i, (start_char, name, is_array) in enumerate(hits):
-            end_char = hits[i+1][0] if i+1 < n else len(text)
+            end_char = hits[i + 1][0] if i + 1 < n else len(text)
             qual_suffix = f"{name}[]" if is_array else name
-            nodes.append(Node(
-                kind=TOML_TABLE,
-                path=posix,
-                span=(start_char, end_char),
-                name=qual_suffix,
-                qual=f"{posix}:{qual_suffix}",
-                meta={"type": "array" if is_array else "table", "raw": name},
-                children=[]
-            ))
+            nodes.append(
+                Node(
+                    kind=TOML_TABLE,
+                    path=posix,
+                    span=(start_char, end_char),
+                    name=qual_suffix,
+                    qual=f"{posix}:{qual_suffix}",
+                    meta={"type": "array" if is_array else "table", "raw": name},
+                    children=[],
+                )
+            )
 
         root.children.extend(nodes)
         assign_ids([root])
@@ -120,7 +128,9 @@ class TomlMinEngine:
                         opts=DEFAULT_OPTIONS,
                         label="document omitted",
                     )
-                    edits.append(Edit(path=doc.path, span=(0, len(doc.text)), replacement=marker))
+                    edits.append(
+                        Edit(path=doc.path, span=(0, len(doc.text)), replacement=marker)
+                    )
                     continue
 
                 if node.kind == TOML_TABLE:
@@ -136,10 +146,12 @@ class TomlMinEngine:
                         b=end_line,
                         indent="",
                         opts=DEFAULT_OPTIONS,
-                        label=label
+                        label=label,
                     )
-                    edits.append(Edit(path=doc.path, span=node.span, replacement=marker))
+                    edits.append(
+                        Edit(path=doc.path, span=node.span, replacement=marker)
+                    )
         return edits
 
-register_engine(TomlMinEngine())
 
+register_engine(TomlMinEngine())

@@ -5,8 +5,10 @@ from typing import Iterable, List, Protocol, Dict, Tuple
 from .ir import Document, Node, Edit
 from .policies import Action, validate_action
 
+
 class Engine(Protocol):
     """One engine per file type (detected via extension)."""
+
     filetypes: set[str]  # e.g., {"py"} or {"md"} or {"yaml","yml","toml"}
 
     def parse(self, path: Path, text: str) -> Document:
@@ -28,12 +30,14 @@ class Engine(Protocol):
     def configure(self, roots: List[Path]) -> None:  # type: ignore[empty-body]
         ...
 
+
 _ENGINES: Dict[str, Engine] = {}
+
 
 def register_engine(engine: Engine) -> None:
     for ext in engine.filetypes:
         _ENGINES[ext.lower().lstrip(".")] = engine
 
+
 def get_engine_for(path: Path) -> Engine | None:
     return _ENGINES.get(path.suffix.lower().lstrip("."))
-

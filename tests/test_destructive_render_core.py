@@ -11,10 +11,10 @@ import re
 
 import textwrap
 
+
 def _write(p, s: str):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(textwrap.dedent(s), encoding="utf-8")
-
 
 
 PKG = "pytoma"
@@ -36,10 +36,10 @@ def _collect_funcs(src: str, modname: str = "m"):
     return lines, coll.funcs
 
 
-
 # -------------------------------------------------------------------
 # Unit tests for apply_destructive (render.py)
 # -------------------------------------------------------------------
+
 
 def test_preserves_class_context_with_sig():
     """
@@ -53,8 +53,10 @@ def test_preserves_class_context_with_sig():
             return y
     """
     lines, funcs = _collect_funcs(src)
+
     def choose_mode(q):  # contract only m
         return "sig" if q.endswith(":C.m") else "full"
+
     out = render.apply_destructive(lines, funcs, choose_mode)
     assert "class C:" in out
     assert "def m(self, x):" in out
@@ -71,7 +73,10 @@ def test_sigdoc_inserts_placeholder_when_no_docstring():
         return a + b
     """
     lines, funcs = _collect_funcs(src)
-    def choose_mode(q): return "sig+doc"
+
+    def choose_mode(q):
+        return "sig+doc"
+
     out = render.apply_destructive(lines, funcs, choose_mode)
     assert "def f(a, b):" in out
     # placeholder added
@@ -80,9 +85,8 @@ def test_sigdoc_inserts_placeholder_when_no_docstring():
     assert "body omitted" in out
 
 
-
 def test_levels_keeps_shallow_and_marks_omissions():
-    code = '''
+    code = """
         def g(n):
             # top-level statement kept
             if n > 0:
@@ -91,8 +95,9 @@ def test_levels_keeps_shallow_and_marks_omissions():
                     total += i
                 return total
             return 0
-        '''
+        """
     lines, funcs = _collect_funcs(code, modname="m")
+
     def choose(q):  # "m:g"
         return "body:levels=0" if q.endswith(":g") else "full"
 
@@ -117,16 +122,19 @@ def test_async_function_with_sig():
         return x
     """
     lines, funcs = _collect_funcs(src)
-    def choose_mode(q): return "sig"
+
+    def choose_mode(q):
+        return "sig"
+
     out = render.apply_destructive(lines, funcs, choose_mode)
     assert "async def fetch(x):" in out
     assert "body omitted" in out
 
 
-
 # -------------------------------------------------------------------
 # Minimal end-to-end with build_prompt (core.py)
 # -------------------------------------------------------------------
+
 
 def test_build_prompt_end_to_end(tmp_path: pathlib.Path):
     """
@@ -148,7 +156,7 @@ def test_build_prompt_end_to_end(tmp_path: pathlib.Path):
 
         def free_func(y):
             return y + 1
-        """
+        """,
     )
 
     core = importlib.import_module(f"{PKG}.core")
@@ -174,10 +182,10 @@ def test_build_prompt_end_to_end(tmp_path: pathlib.Path):
     assert "return y + 1" not in out
 
 
-
 # -------------------------------------------------------------------
 # Additional edge cases (optional)
 # -------------------------------------------------------------------
+
 
 def test_multiple_functions_only_one_contracted():
     """
@@ -191,8 +199,10 @@ def test_multiple_functions_only_one_contracted():
         return 2
     """
     lines, funcs = _collect_funcs(src)
+
     def choose_mode(q):  # contract only a
         return "sig" if q.endswith(":a") else "full"
+
     out = render.apply_destructive(lines, funcs, choose_mode)
 
     assert "def a():" in out
@@ -201,4 +211,3 @@ def test_multiple_functions_only_one_contracted():
     assert "return 2" in out
     # and the original body of a is no longer there
     assert "return 1" not in out
-

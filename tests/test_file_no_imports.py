@@ -4,9 +4,11 @@ import textwrap
 import pathlib
 import re
 
+
 def _write(p, s: str):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(textwrap.dedent(s), encoding="utf-8")
+
 
 def test_file_no_imports_basic(tmp_path):
     core = importlib.import_module("pytoma.core")
@@ -27,15 +29,19 @@ def test_file_no_imports_basic(tmp_path):
         def f(x):
             import sys  # inside-function: must remain
             return os.listdir(".")  # 'os' will be visible in the prompt even if the import is removed
-        """
+        """,
     )
 
     abs_root = pkg.resolve().as_posix()
     cfg = core.Config(
         default="full",
         rules=[
-            core.Rule(match=f"{abs_root}/*.py", mode="file:no-imports"),      # files directly under pkg
-            core.Rule(match=f"{abs_root}/**/*.py", mode="file:no-imports"),   # and subfolders
+            core.Rule(
+                match=f"{abs_root}/*.py", mode="file:no-imports"
+            ),  # files directly under pkg
+            core.Rule(
+                match=f"{abs_root}/**/*.py", mode="file:no-imports"
+            ),  # and subfolders
         ],
         excludes=[],
     )
@@ -78,7 +84,7 @@ def test_file_no_imports_composes_with_sig_rule(tmp_path):
 
         def g(y):
             return sqrt(y) + 1
-        """
+        """,
     )
 
     # 1) absolute rule on the file -> no-imports
@@ -114,4 +120,3 @@ def test_file_no_imports_composes_with_sig_rule(tmp_path):
 
     # The original body must no longer appear
     assert "return sqrt(y) + 1" not in out
-

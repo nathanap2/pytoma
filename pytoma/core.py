@@ -12,8 +12,8 @@ from .ir import Edit, Document, Node, PY_MODULE, MD_DOC
 
 # load engines (side-effect: register_engine)
 from .engines import python_min  # noqa: F401
-from .engines import markdown_min  # noqa: F401 
-from .engines import toml_min     # noqa: F401
+from .engines import markdown_min  # noqa: F401
+from .engines import toml_min  # noqa: F401
 
 from .pre_resolution import pre_resolve_path_rules
 
@@ -24,7 +24,7 @@ from .config import Config, Rule
 # "absolute": shows the absolute path
 # "strip"   : shows the path relative to the provided root (the deepest one if multiple)
 
-DISPLAY_PATH_MODE = "strip"   # or "absolute"
+DISPLAY_PATH_MODE = "strip"  # or "absolute"
 
 
 def _display_path(path: pathlib.Path, roots: list[pathlib.Path]) -> str:
@@ -34,7 +34,7 @@ def _display_path(path: pathlib.Path, roots: list[pathlib.Path]) -> str:
       Falls back to absolute if no root contains 'path'.
     - In "absolute" mode: POSIX absolute path.
     """
-    
+
     p = path.resolve()
     if DISPLAY_PATH_MODE != "strip":
         return p.as_posix()
@@ -54,10 +54,9 @@ def _display_path(path: pathlib.Path, roots: list[pathlib.Path]) -> str:
     return best_rel if best_rel is not None else p.as_posix()
 
 
-
-
 def fnmatchcase(s: str, pat: str) -> bool:
     import fnmatch
+
     return fnmatch.fnmatchcase(s, pat)
 
 
@@ -90,17 +89,19 @@ def _qual_candidates(node: Node, roots: list[pathlib.Path]) -> list[str]:
     # deduplicate while preserving order
     return list(dict.fromkeys(cands))
 
-    
-def _decide_for_node(node: Node, cfg: Config, path_candidates: list[str], roots: list[pathlib.Path]) -> Action:
+
+def _decide_for_node(
+    node: Node, cfg: Config, path_candidates: list[str], roots: list[pathlib.Path]
+) -> Action:
     # 1) qualname rules (now tested against relative/absolute variants)
     if node.qual:
         qvars = _qual_candidates(node, roots)
-        for r in (cfg.rules or []):
+        for r in cfg.rules or []:
             if ":" in r.match and any(fnmatchcase(q, r.match) for q in qvars):
                 return to_action(r.mode)
 
     # 2) path rules (same as yours, on ABS + REL + basename/REL)
-    for r in (cfg.rules or []):
+    for r in cfg.rules or []:
         if ":" not in r.match and any(fnmatchcase(c, r.match) for c in path_candidates):
             a = to_action(r.mode)
             if a.kind.startswith("file:"):
@@ -115,11 +116,18 @@ def _decide_for_node(node: Node, cfg: Config, path_candidates: list[str], roots:
 
 def _fence_lang_for(path: pathlib.Path) -> str:
     ext = path.suffix.lower().lstrip(".")
-    return {"py": "python", "md": "markdown", "yaml": "yaml", "yml": "yaml", "toml": "toml"}.get(ext, "")
+    return {
+        "py": "python",
+        "md": "markdown",
+        "yaml": "yaml",
+        "yml": "yaml",
+        "toml": "toml",
+    }.get(ext, "")
+
 
 def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
     out: List[str] = []
-    
+
     # Resolve conflicts in config
     cfg, warns = pre_resolve_path_rules(cfg)
 
@@ -130,7 +138,9 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
         roots.append(p if p.is_dir() else p.parent)
 
     # Generic discovery
-    discovered = list(iter_files(paths, includes=("**/*",), excludes=(cfg.excludes or [])))
+    discovered = list(
+        iter_files(paths, includes=("**/*",), excludes=(cfg.excludes or []))
+    )
     discovered.sort(key=lambda p: p.as_posix())
 
     all_edits: List[Edit] = []
@@ -161,7 +171,7 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
         decisions: List[Tuple[Node, Action]] = []
 
         cands = _path_candidates(path, roots)
-        
+
         for node in doc.nodes:
             a = _decide_for_node(node, cfg, cands, roots)
             if engine.supports(a):
@@ -175,7 +185,6 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
     # preview
     previews: Dict[pathlib.Path, str] = apply_edits_preview(all_edits)
 
-
     # pack — only eligible files (handled by an engine),
     # and without re-reading from disk (reuse docs_text)
     for path in eligible:
@@ -186,4 +195,3 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
         out.append(f"\n### {display}\n\n{fence}\n{shown}\n```\n")
 
     return "# (no files found)\n" if not out else "".join(out)
-

@@ -10,12 +10,15 @@ RenderFn = Callable[[FuncInfo, List[str]], str]
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _ensure_trailing_nl(s: str) -> str:
     return s if s.endswith("\n") else s + "\n"
+
 
 def _line_indent(s: str) -> str:
     m = re.match(r"[ \t]*", s)
     return m.group(0) if m else ""
+
 
 def header_exact(func: FuncInfo, src: List[str]) -> str:
     """
@@ -25,6 +28,7 @@ def header_exact(func: FuncInfo, src: List[str]) -> str:
     end_line = (func.body_first_line - 1) if func.body_first_line else func.end[0]
     text = "".join(src[func.deco_start_line - 1 : end_line])
     return _ensure_trailing_nl(text)
+
 
 def header_one_line(func: FuncInfo, src: List[str]) -> str:
     """
@@ -45,6 +49,7 @@ def header_one_line(func: FuncInfo, src: List[str]) -> str:
         content = content.rstrip() + ":"
     return _ensure_trailing_nl(content)
 
+
 def signature_compact(node) -> str:
     """
     Historical compatibility: some older renderers relied on a synthetic
@@ -57,6 +62,7 @@ def signature_compact(node) -> str:
     name = getattr(getattr(node, "name", None), "value", None) or "function"
     return f"def {name}(...):\n"
 
+
 def compute_body_range(func: FuncInfo) -> Optional[Tuple[int, int]]:
     """
     Return inclusive (start_line, end_line) for the function body.
@@ -64,6 +70,7 @@ def compute_body_range(func: FuncInfo) -> Optional[Tuple[int, int]]:
     if not func.body_first_line:
         return None
     return (func.body_first_line, func.end[0])
+
 
 def indent_level(line: str) -> int:
     """
@@ -79,7 +86,10 @@ def indent_level(line: str) -> int:
             break
     return level
 
-def slice_with_levels(src: List[str], start: int, end: int, keep_levels: int) -> Tuple[List[str], List[Tuple[int, int]]]:
+
+def slice_with_levels(
+    src: List[str], start: int, end: int, keep_levels: int
+) -> Tuple[List[str], List[Tuple[int, int]]]:
     """
     Keep lines whose indentation (column) does not exceed
     base_indent + keep_levels*4; group the omitted spans.
@@ -125,9 +135,11 @@ def slice_with_levels(src: List[str], start: int, end: int, keep_levels: int) ->
     flush(end + 1)
     return kept, omitted
 
+
 # ---------------------------------------------------------------------------
 # Destructive editing API (we keep everything then remove)
 # ---------------------------------------------------------------------------
+
 
 def _sig_block(fi: FuncInfo, src: List[str]) -> str:
     # One-line signature + omission marker (instead of "...")
@@ -147,6 +159,7 @@ def _sig_block(fi: FuncInfo, src: List[str]) -> str:
         return h + marker
     # Fallback if body cannot be computed
     return h + f"{indent}    ...\n"
+
 
 def _sigdoc_block(fi: FuncInfo, src: List[str]) -> str:
     h = header_one_line(fi, src)
@@ -173,6 +186,7 @@ def _sigdoc_block(fi: FuncInfo, src: List[str]) -> str:
         parts.append(f"{indent}    ...\n")
     return "".join(parts)
 
+
 def _levels_block(fi: FuncInfo, src: List[str], keep_levels: int) -> str:
     parts: List[str] = [header_exact(fi, src)]
     rng = compute_body_range(fi)
@@ -180,7 +194,11 @@ def _levels_block(fi: FuncInfo, src: List[str], keep_levels: int) -> str:
         return "".join(parts)
     kept, omitted = slice_with_levels(src, rng[0], rng[1], keep_levels=keep_levels)
     # docstring if omitted
-    if fi.docstring and fi.doc_range and any(a <= fi.doc_range[0] <= b for (a, b) in omitted):
+    if (
+        fi.docstring
+        and fi.doc_range
+        and any(a <= fi.doc_range[0] <= b for (a, b) in omitted)
+    ):
         parts.append(_ensure_trailing_nl(fi.docstring))
     parts.extend(kept)
     base_indent = _line_indent(src[rng[0] - 1]) + " " * 4
@@ -197,7 +215,10 @@ def _levels_block(fi: FuncInfo, src: List[str], keep_levels: int) -> str:
         )
     return "".join(parts)
 
-def _replacement_for_mode(mode: str, fi: FuncInfo, src: List[str]) -> Optional[Tuple[int, int, str]]:
+
+def _replacement_for_mode(
+    mode: str, fi: FuncInfo, src: List[str]
+) -> Optional[Tuple[int, int, str]]:
     """
     Compute (start_line, end_line, replacement_text) for a given function.
     start/end are inclusive (1-based).
@@ -217,6 +238,7 @@ def _replacement_for_mode(mode: str, fi: FuncInfo, src: List[str]) -> Optional[T
             return None
         block = _levels_block(fi, src, int(m.group(1)))
     return (fi.deco_start_line, fi.end[0], block)
+
 
 def apply_destructive(src: List[str], funcs: List[FuncInfo], choose_mode_fn) -> str:
     """
@@ -243,4 +265,3 @@ def apply_destructive(src: List[str], funcs: List[FuncInfo], choose_mode_fn) -> 
     if isinstance(out, list):
         return "".join(out)
     return out
-

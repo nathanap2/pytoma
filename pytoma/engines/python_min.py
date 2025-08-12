@@ -20,9 +20,11 @@ from ..ir import assign_ids, flatten
 
 _MODULE_ROOTS: List[Path] = []
 
+
 def set_module_roots(roots: List[Path]) -> None:
     global _MODULE_ROOTS
     _MODULE_ROOTS = [r.resolve() for r in roots]
+
 
 def _module_name(path: Path) -> str:
     for root in _MODULE_ROOTS:
@@ -37,6 +39,7 @@ def _module_name(path: Path) -> str:
         parts = parts[:-1]
     return ".".join(parts)
 
+
 def _line_starts(text: str) -> List[int]:
     starts = [0]
     acc = 0
@@ -45,10 +48,12 @@ def _line_starts(text: str) -> List[int]:
         starts.append(acc)
     return starts
 
+
 def _line_span_to_char_span(ls: List[int], start_line: int, end_line: int) -> Span:
     s = ls[start_line - 1]
     t = ls[end_line]
     return (s, t)
+
 
 def _visibility(name: str) -> str:
     if name.startswith("__") and name.endswith("__"):
@@ -57,9 +62,11 @@ def _visibility(name: str) -> str:
         return "private"
     return "public"
 
+
 def _decorator_to_str_py(fn_dec: cst.Decorator) -> str:
     # Best-effort rendering (without arguments if complex call)
     expr = fn_dec.decorator
+
     def _name(e: cst.CSTNode) -> Optional[str]:
         if isinstance(e, cst.Name):
             return e.value
@@ -69,7 +76,9 @@ def _decorator_to_str_py(fn_dec: cst.Decorator) -> str:
         if isinstance(e, cst.Call):
             return _name(e.func)  # @decorator(args) -> "decorator"
         return None
+
     return _name(expr) or "decorator"
+
 
 def _drop_top_level_imports(text: str, path: PurePosixPath) -> List[Edit]:
     """
@@ -91,12 +100,15 @@ def _drop_top_level_imports(text: str, path: PurePosixPath) -> List[Edit]:
             edits.append(Edit(path=path, span=(s, e), replacement=""))
     return edits
 
+
 # ---------------------------
 # Classes (via ast) → (qual, span, parent, decorators)
 # ---------------------------
 
+
 class _ClassVisitor(ast.NodeVisitor):
     """Collect nested classes with qualnames and decorators."""
+
     def __init__(self, text: str) -> None:
         self.text = text
         self.stack: List[str] = []
@@ -105,7 +117,11 @@ class _ClassVisitor(ast.NodeVisitor):
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         start_ln = min(
-            [getattr(d, "lineno", node.lineno) for d in getattr(node, "decorator_list", [])] + [node.lineno]
+            [
+                getattr(d, "lineno", node.lineno)
+                for d in getattr(node, "decorator_list", [])
+            ]
+            + [node.lineno]
         )
         end_ln = node.end_lineno
         end_col = node.end_col_offset
@@ -120,20 +136,24 @@ class _ClassVisitor(ast.NodeVisitor):
                 decos.append(ast.unparse(d))
             except Exception:
                 decos.append("decorator")
-        self.items.append({
-            "name": node.name,
-            "qual_local": qual_local,
-            "parent_local": parent_local,
-            "span": (start, end),
-            "decorators": decos,
-        })
+        self.items.append(
+            {
+                "name": node.name,
+                "qual_local": qual_local,
+                "parent_local": parent_local,
+                "span": (start, end),
+                "decorators": decos,
+            }
+        )
         self.stack.append(node.name)
         self.generic_visit(node)
         self.stack.pop()
 
+
 # ---------------------------
 # Collect FuncInfo via libcst
 # ---------------------------
+
 
 def _collect_funcs(text: str, path: Path) -> Tuple[List[str], List[FuncInfo]]:
     src = text.splitlines(keepends=True)
@@ -145,25 +165,33 @@ def _collect_funcs(text: str, path: Path) -> Tuple[List[str], List[FuncInfo]]:
     wrapper.visit(collector)
     return src, collector.funcs
 
+
 def _mode_of_action(a: Action) -> str | None:
     k = a.kind
-    if k == "full": return "full"
-    if k == "hide": return "hide"
-    if k == "sig": return "sig"
-    if k == "sig+doc": return "sig+doc"
+    if k == "full":
+        return "full"
+    if k == "hide":
+        return "hide"
+    if k == "sig":
+        return "sig"
+    if k == "sig+doc":
+        return "sig+doc"
     if k == "levels":
         kk = int(a.params.get("k", 1))
         return f"body:levels={kk}"
     return None
 
+
 # ---------------------------
 # Engine
 # ---------------------------
+
 
 class PythonMinEngine:
     """
     Function/method granularity, now as a tree (module → classes → defs).
     """
+
     filetypes = {"py"}
 
     # NEW: optional hook
@@ -187,7 +215,7 @@ class PythonMinEngine:
             name=str(posix),
             qual=f"{module_name}",
             meta={},
-            children=[]
+            children=[],
         )
 
         # --- Classes (with nesting) ---
@@ -213,7 +241,7 @@ class PythonMinEngine:
                         "decorators": decorators,
                         "visibility": _visibility(name),
                     },
-                    children=[]
+                    children=[],
                 )
                 if parent_local and parent_local in cls_nodes:
                     cls_nodes[parent_local].children.append(n)
@@ -229,7 +257,9 @@ class PythonMinEngine:
             # Span (includes decorators)
             s = ls[fi.deco_start_line - 1]
             e = ls[fi.end[0] - 1] + fi.end[1]
-            local = fi.qualname.split(":", 1)[1]   # "func" or "Class.meth" or "outer.inner"
+            local = fi.qualname.split(":", 1)[
+                1
+            ]  # "func" or "Class.meth" or "outer.inner"
             parts = local.split(".")
             name = parts[-1]
             parent_local = ".".join(parts[:-1]) if len(parts) > 1 else None
@@ -262,7 +292,7 @@ class PythonMinEngine:
                     "visibility": _visibility(name),
                     "has_doc": bool(fi.docstring),
                 },
-                children=[]
+                children=[],
             )
             parent.children.append(n)
             fn_nodes[local] = n
@@ -279,11 +309,12 @@ class PythonMinEngine:
             or action.kind == "levels"
             or action.kind in {"file:no-imports"}
         )
+
     def render(self, doc: Document, decisions: List[Tuple[Node, Action]]) -> List[Edit]:
         # Unchanged rendering: based on FuncInfo (more robust for replacements)
         src, funcs = _collect_funcs(doc.text, Path(doc.path))
         ls = _line_starts(doc.text)
-        by_qual: Dict[str, FuncInfo] = { fi.qualname: fi for fi in funcs }
+        by_qual: Dict[str, FuncInfo] = {fi.qualname: fi for fi in funcs}
 
         candidates: List[Edit] = []
         for node, action in decisions:
@@ -297,8 +328,17 @@ class PythonMinEngine:
                 continue
             if node.kind == PY_MODULE and mode == "hide":
                 # Mark omission of the entire module
-                marker = make_omission_line("py", 1, doc.text.count("\n")+1, indent="", opts=DEFAULT_OPTIONS, label="module omitted")
-                candidates.append(Edit(path=doc.path, span=(0, len(doc.text)), replacement=marker))
+                marker = make_omission_line(
+                    "py",
+                    1,
+                    doc.text.count("\n") + 1,
+                    indent="",
+                    opts=DEFAULT_OPTIONS,
+                    label="module omitted",
+                )
+                candidates.append(
+                    Edit(path=doc.path, span=(0, len(doc.text)), replacement=marker)
+                )
                 continue
             if node.kind == PY_CLASS:
                 if mode == "hide":
@@ -308,9 +348,22 @@ class PythonMinEngine:
                     omitted_text = doc.text[s:t]
                     start_line = before.count("\n") + 1
                     end_line = start_line + omitted_text.count("\n")
-                    indent = ""  # could be refined by reusing the indent of the first line
-                    marker = make_omission_line("py", start_line, end_line, indent=indent, opts=DEFAULT_OPTIONS, label=f"class {node.name} omitted" if node.name else "class omitted")
-                    candidates.append(Edit(path=doc.path, span=node.span, replacement=marker))
+                    indent = (
+                        ""  # could be refined by reusing the indent of the first line
+                    )
+                    marker = make_omission_line(
+                        "py",
+                        start_line,
+                        end_line,
+                        indent=indent,
+                        opts=DEFAULT_OPTIONS,
+                        label=f"class {node.name} omitted"
+                        if node.name
+                        else "class omitted",
+                    )
+                    candidates.append(
+                        Edit(path=doc.path, span=node.span, replacement=marker)
+                    )
                 continue
             if node.kind in {PY_FUNCTION, PY_METHOD}:
                 fi = by_qual.get(node.qual or "")
@@ -322,8 +375,17 @@ class PythonMinEngine:
                         start_line = before.count("\n") + 1
                         end_line = start_line + omitted_text.count("\n")
                         indent = ""
-                        marker = make_omission_line("py", start_line, end_line, indent=indent, opts=DEFAULT_OPTIONS, label="definition omitted")
-                        candidates.append(Edit(path=doc.path, span=node.span, replacement=marker))
+                        marker = make_omission_line(
+                            "py",
+                            start_line,
+                            end_line,
+                            indent=indent,
+                            opts=DEFAULT_OPTIONS,
+                            label="definition omitted",
+                        )
+                        candidates.append(
+                            Edit(path=doc.path, span=node.span, replacement=marker)
+                        )
                     continue
                 rep = _replacement_for_mode(mode, fi, src)
                 if not rep:
@@ -335,6 +397,6 @@ class PythonMinEngine:
         # No deduplication/pruning here: delegate to fs.merge_edits
         return candidates
 
+
 # registration
 register_engine(PythonMinEngine())
-

@@ -5,14 +5,17 @@ from typing import Literal
 
 Style = Literal["comment", "scissors", "ellipsis", "box"]
 
+
 @dataclass(frozen=True)
 class MarkerOptions:
     style: Style = "comment"
     show_counts: bool = True
     ascii_only: bool = False
-    width: int = 88 # only used for "box"
+    width: int = 88  # only used for "box"
+
 
 DEFAULT_OPTIONS = MarkerOptions()
+
 
 def _comment_wrap(lang: str, text: str, indent: str = "") -> str:
     """
@@ -27,11 +30,14 @@ def _comment_wrap(lang: str, text: str, indent: str = "") -> str:
         return f"{indent}<!-- {text} -->\n"
     return f"{indent}# {text}\n"
 
+
 def _ellipsis(opts: MarkerOptions) -> str:
     return "..." if opts.ascii_only else "…"
 
+
 def _scissors(opts: MarkerOptions) -> str:
     return "8<" if opts.ascii_only else "✂"
+
 
 def _count_text(a: int, b: int, opts: MarkerOptions) -> str:
     n = max(0, b - a + 1)
@@ -41,10 +47,12 @@ def _count_text(a: int, b: int, opts: MarkerOptions) -> str:
     unit = "line" if n == 1 else "lines"
     return f" ({n} {unit})"
 
+
 def _box_line(width: int, ascii_only: bool) -> str:
     if ascii_only:
         return "-" * width
     return "─" * width
+
 
 def _box_text(text: str, opts: MarkerOptions, indent: str) -> str:
     """
@@ -57,6 +65,7 @@ def _box_text(text: str, opts: MarkerOptions, indent: str) -> str:
     mid = indent + inner + "\n"
     bot = indent + line + "\n"
     return top + mid + bot
+
 
 def make_omission_line(
     lang: str,
@@ -97,4 +106,3 @@ def make_omission_line(
     # default: "comment"
     text = f"{ell} lines {rng} {base}{extra} {ell}"
     return _comment_wrap(lang, text, indent)
-

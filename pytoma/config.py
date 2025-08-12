@@ -12,6 +12,7 @@ class Rule:
     match: str
     mode: str
 
+
 @dataclass
 class Config:
     default: str = "full"
@@ -31,7 +32,9 @@ class Config:
             match = r.get("match")
             mode = r.get("mode")
             if not isinstance(match, str) or not isinstance(mode, str):
-                raise TypeError(f"rules[{i}] must contain 'match' (str) and 'mode' (str)")
+                raise TypeError(
+                    f"rules[{i}] must contain 'match' (str) and 'mode' (str)"
+                )
             out.append(Rule(match=match, mode=validate_mode(str(mode))))
         return out
 
@@ -40,8 +43,19 @@ class Config:
         default = validate_mode(str(fallback_default))
         rules: List[Rule] = []
         excludes = [
-          ".venv/**","venv/**","**/__pycache__/**","dist/**","build/**","site-packages/**","**/*.pyi",
-          "*.egg-info/**","**/*.egg-info/**","*.dist-info/**","**/*.dist-info/**", "*.pytest_cache/**", "**/*.pytest_cache/**"
+            ".venv/**",
+            "venv/**",
+            "**/__pycache__/**",
+            "dist/**",
+            "build/**",
+            "site-packages/**",
+            "**/*.pyi",
+            "*.egg-info/**",
+            "**/*.egg-info/**",
+            "*.dist-info/**",
+            "**/*.dist-info/**",
+            "*.pytest_cache/**",
+            "**/*.pytest_cache/**",
         ]
         if path is None:
             return Config(default=default, rules=rules, excludes=excludes)
