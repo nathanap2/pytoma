@@ -1,10 +1,12 @@
 # Pytoma — Condense a codebase into a single, LLM-friendly text pack
 
-Pytoma turns a (python - for now ...) repository (or a list of files) into one concise text file.
-You choose **what to show** (full code, signature + docstring, partial bodies, or hidden) **per function, class, file, or folder** via a small YAML config or CLI options. The output is a Markdown-like pack with section headers and fenced code blocks, ideal for prompting an LLM or sharing a focused snapshot with collaborators.
-May also be used to hide sensitive code snippets to protect innovative approaches.
+Pytoma turns your python repo into one concise text file.
+You choose **what to show** (full code, signature + docstring, partial bodies ...) **per function, class, file, or folder**. 
 
-I originally vibe-coded it quickly for myself because chatGPT wouldn't accept more than 10 files and the file-to-prompts lib didn't allow me to hide certain sections, but it turned out to be very handy and useful, so I refined it and am now sharing it.
+You can configure what will be showed via a small YAML config or CLI options, and the output is a single text file divided in fenced code blocks, ideal for prompting an LLM or sharing a focused snapshot with collaborators. You can also use it to hide sensitive code snippets to protect your innovative ideas.
+
+Note from the author : I originally vibe-coded a basic tool for myself because chatGPT wouldn't accept more than 10 files and the file-to-prompts lib didn't allow me to hide certain sections ... but it turned out to be very handy and useful, so I refined it and it became this project.
+
 
 ---
 
@@ -21,7 +23,7 @@ I originally vibe-coded it quickly for myself because chatGPT wouldn't accept mo
   * Python (`.py`): granular per function/method/class.
   * Markdown (`.md`): per heading or whole document (supports `full`/`hide`).
   * Yaml and toml will soon be added
-* Outputs a single text artifact; never touches your sources.
+  * A description or short extract of heavy files, ML artifacts, etc., is also to be expected
 
 ---
 
@@ -249,6 +251,7 @@ Override in `config.yml → excludes`.
 ## Pitfalls
 
 - **Rule order can still be tricky.** For instance, you should  put `file:*` first) if you don't want it to be erased by a rule on sig+doc.
+If a hide is mentionned after another rule that imply the same file, things may also get messy.
 I 'm looking forward to improving that soon.
 For the moment, for tricky setups, you can simply ask an LLM to draft the rules for you (from your repo tree and goals).
 

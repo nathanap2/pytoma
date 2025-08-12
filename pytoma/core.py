@@ -15,6 +15,10 @@ from .engines import python_min  # noqa: F401
 from .engines import markdown_min  # noqa: F401 
 from .engines import toml_min     # noqa: F401
 
+from .pre_resolution import pre_resolve_path_rules
+
+from .config import Config, Rule
+
 
 # --- Display options ---
 # "absolute": shows the absolute path
@@ -50,60 +54,7 @@ def _display_path(path: pathlib.Path, roots: list[pathlib.Path]) -> str:
     return best_rel if best_rel is not None else p.as_posix()
 
 
-@dataclass
-class Rule:
-    # match = either a qualname containing ":" (e.g. "pkg.mod:Class.func*"),
-    # or a POSIX path glob "pkg/**/file.py"
-    match: str
-    mode: str
 
-@dataclass
-class Config:
-    default: str = "full"
-    rules: List[Rule] = None  # type: ignore
-    excludes: List[str] = None
-
-    @staticmethod
-    def _coerce_rules(obj: object) -> List[Rule]:
-        out: List[Rule] = []
-        if not obj:
-            return out
-        if not isinstance(obj, list):
-            raise TypeError("rules must be a list of {match, mode} objects")
-        for i, r in enumerate(obj):
-            if not isinstance(r, dict):
-                raise TypeError(f"rules[{i}] must be a dict")
-            match = r.get("match")
-            mode = r.get("mode")
-            if not isinstance(match, str) or not isinstance(mode, str):
-                raise TypeError(f"rules[{i}] must contain 'match' (str) and 'mode' (str)")
-            out.append(Rule(match=match, mode=validate_mode(str(mode))))
-        return out
-
-    @staticmethod
-    def load(path: Optional[pathlib.Path], fallback_default: str = "full") -> "Config":
-        default = validate_mode(str(fallback_default))
-        rules: List[Rule] = []
-        excludes = [
-          ".venv/**","venv/**","**/__pycache__/**","dist/**","build/**","site-packages/**","**/*.pyi",
-          "*.egg-info/**","**/*.egg-info/**","*.dist-info/**","**/*.dist-info/**", "*.pytest_cache/**", "**/*.pytest_cache/**"
-        ]
-        if path is None:
-            return Config(default=default, rules=rules, excludes=excludes)
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if data is None:
-            return Config(default=default, rules=rules, excludes=excludes)
-        if not isinstance(data, dict):
-            raise TypeError("YAML config must be a mapping")
-        if "default" in data:
-            default = validate_mode(str(data["default"]))
-        rules = Config._coerce_rules(data.get("rules"))
-        ex = data.get("excludes")
-        if ex:
-            if not isinstance(ex, list) or not all(isinstance(x, str) for x in ex):
-                raise TypeError("excludes must be a list of strings")
-            excludes = ex
-        return Config(default=default, rules=rules, excludes=excludes)
 
 def fnmatchcase(s: str, pat: str) -> bool:
     import fnmatch
@@ -168,6 +119,9 @@ def _fence_lang_for(path: pathlib.Path) -> str:
 
 def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
     out: List[str] = []
+    
+    # Resolve conflicts in config
+    cfg, warns = pre_resolve_path_rules(cfg)
 
     # Roots: dirs that contain the provided paths
     roots: List[pathlib.Path] = []

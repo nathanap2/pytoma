@@ -41,6 +41,7 @@ register_action("file:no-imports")
 
 MODE_RE = re.compile(r"^(hide|sig|sig\+doc|full|body:levels=(\d+)|file:no-imports)$")
 
+
 def validate_mode(mode: str) -> str:
     if not MODE_RE.match(mode):
         raise ValueError(f"invalid mode: {mode}")
