@@ -6,7 +6,7 @@ import sys
 import re
 
 import pytest
-
+from pytoma.markers import make_omission_line, DEFAULT_OPTIONS
 
 # -- Import the module to test (tolerates two possible organizations) --
 try:
@@ -151,7 +151,7 @@ def test_slugify_removes_accents_and_punctuation():
     assert slug == "elevation-cout"
 
 
-def test_hide_on_document_removes_all():
+def test_hide_on_document_inserts_marker():
     md = """# Titre
 Texte 1
 
@@ -166,7 +166,17 @@ b
     root = doc.roots[0]
     edits = eng.render(doc, decisions=[(root, _Action("hide"))])
     out = _apply_edits(doc.text, edits)
-    assert out == ""
+
+    n_lines = md.count("\n") + 1
+    expected = make_omission_line(
+        lang="md",
+        a=1,
+        b=n_lines,
+        indent="",
+        opts=DEFAULT_OPTIONS,
+        label="document omitted",
+    )
+    assert out == expected
 
 
 def test_fallback_regex_still_parses_headings(monkeypatch):

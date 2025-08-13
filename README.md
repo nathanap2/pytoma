@@ -107,15 +107,7 @@ rules:
     mode: "hide"
 ````
 
-### Rule matching & precedence
-
-When Pytoma walks each document’s nodes, it decides a policy with this order:
-
-1. **Qualname rules** (heuristic: presence of `:` in `match` ⇒ match against `node.qual`)
-2. **Path rules** (fnmatch on **absolute POSIX path**)
-
-   * `file:*` modes apply **only** to the module/document root node.
-3. **Global default**
+Note : when Pytoma walks each document’s nodes, it decides a policy with this order: qualname rules > path rules > global default.
 
 ---
 
@@ -138,22 +130,6 @@ Markers are comment-style lines (or a light box) with line counts, e.g.:
 # … lines 42–97 body omitted (56 lines) …
 ```
 
----
-
-## Path display in the pack
-
-Section headers show a file path.
-A small global toggle controls whether absolute paths are shown or they’re **stripped relative to the provided roots**.
-
-```python
-# core.py
-DISPLAY_PATH_MODE = "strip"   # or "absolute"
-```
-
-* `"strip"`: use the **deepest matching root** to compute a relative path.
-* `"absolute"`: show absolute POSIX paths.
-
-(If you prefer a CLI flag later, this can be wired easily.)
 
 ---
 
@@ -187,21 +163,44 @@ rules:
 
 ---
 
-## Python API (library use)
+## Excludes
 
-```python
-from pathlib import Path
-from pytoma.core import Config, build_prompt
+By default, Pytoma skips:
 
-cfg = Config.load(Path("config.yml"), fallback_default="full")
-text = build_prompt([Path("/abs/repo")], cfg)
-Path("PACK.txt").write_text(text, encoding="utf-8")
+```
+.venv/**, **/__pycache__/**, dist/**, build/**, site-packages/**, **/*.pyi
 ```
 
-Advanced:
+You can override in `config.yml → excludes`.
 
-* Engines auto-configure with the provided roots (used to compute module names).
-* If you need to **apply edits on disk** (not typical for packs), see `pytoma.edits.apply_edits_in_place`, but the CLI uses a non-destructive preview.
+---
+
+## Pitfalls
+
+- **Rule order can still be tricky** when several rules are about the same file. I'm looking forward to improving that soon. For the moment, prefer being as explicit as possible, and for tricky setups, you can simply ask an LLM to draft the rules for you (from your repo tree and goals).
+- To name a markdown section in the config file, you still **need to give the slugified version** of the section
+
+## Roadmap
+
+* Engine for **YAML / JSON** (keys/tables granularity), **CSV** (short preview like pandas does), etc.
+* Better summary of skipped lines (for instance, when skipping imports, in the examples of skipped imports, we should probably prioritize unexpected imports over classic ones such as sys, os ...)
+* Propose the automatic addition of inferred rules: in particular, functions that are only called by hidden functions should probably be hidden by default.
+* More markers + Let the user choose their markers, rule by rule, using the configuration
+* A “custom:alternative_version” rule to simply replace a block with an alternative version of the block provided by the user.
+* Heuristics to suggest rules (and possibility to condition it by a section which we want to focus on) -> may actually become another independent tool ... 
+* ... and even smarter module targeting via **dependency graphs , embeddings**, git edit correlations, etc.
+
+---
+
+## Current engines & support matrix
+
+| Engine / Mode    | full | hide | sig | sig+doc | body\:levels=k | file\:no-imports |
+| ---------------- | :--: | :--: | :-: | :-----: | :------------: | :--------------: |
+| Python (`.py`)   |   ✅  |   ✅  |  ✅  |    ✅    |        ✅       |         ✅        |
+| Markdown (`.md`) |   ✅  |   ✅  |  –  |    –    |        –       |         –        |
+
+Planned: YAML/TOML section policies (toml already started)
+
 
 ---
 
@@ -214,45 +213,6 @@ Advanced:
 * Engines render actions into concrete `Edit`s (byte spans + replacements).
 * Edits are **merged**.
 * The final pack concatenates per-file sections with language fences.
-
----
-
-## Current engines & support matrix
-
-| Engine / Mode    | full | hide | sig | sig+doc | body\:levels=k | file\:no-imports |
-| ---------------- | :--: | :--: | :-: | :-----: | :------------: | :--------------: |
-| Python (`.py`)   |   ✅  |   ✅  |  ✅  |    ✅    |        ✅       |         ✅        |
-| Markdown (`.md`) |   ✅  |   ✅  |  –  |    –    |        –       |         –        |
-
-Planned: YAML/TOML section policies.
-
----
-
-## Excludes
-
-By default, Pytoma skips:
-
-```
-.venv/**, **/__pycache__/**, dist/**, build/**, site-packages/**, **/*.pyi
-```
-
-Override in `config.yml → excludes`.
-
----
-
-## Pitfalls
-
-- **Rule order can still be tricky** when several rules are about the same file. I'm looking forward to improving that soon. For the moment, prefer being as explicit as possible, and for tricky setups, you can simply ask an LLM to draft the rules for you (from your repo tree and goals).
-- To name a markdown section in the config file, you still **need to give the slugified version** of the section
-
-## Roadmap
-
-* Engine for **YAML** (keys/tables granularity).
-* CLI flag for `DISPLAY_PATH_MODE`.
-* Propose the automatic addition of inferred rules: in particular, functions that are only called by hidden functions should probably be hidden by default.
-* Heuristics to suggest rules (and possibility to condition it by a section which we want to focus on) -> may actually become another independent tool ... 
-* ... and even smarter module targeting via **dependency graphs , embeddings**, git edit correlations, etc.
-
 
 ---
 

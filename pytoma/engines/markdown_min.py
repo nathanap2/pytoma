@@ -7,6 +7,9 @@ from ..ir import Document, Node, Edit, MD_DOC, MD_HEADING, assign_ids, flatten
 from ..policies import Action
 from ..base import register_engine
 
+from ..markers import DEFAULT_OPTIONS, make_omission_line
+
+
 # -- Optional dependency: markdown-it-py (CommonMark). Regex fallback if missing.
 try:
     from markdown_it import MarkdownIt  # type: ignore
@@ -181,18 +184,48 @@ class MarkdownMinEngine:
     def render(self, doc: Document, decisions: List[Tuple[Node, Action]]) -> List[Edit]:
         candidates: List[Edit] = []
         for node, action in decisions:
-            if action.kind == "full":
+            if action.kind != "hide":
                 continue
-            if action.kind == "hide":
-                # hide on the root -> remove the entire document
-                if node.kind == MD_DOC:
-                    candidates.append(
-                        Edit(path=doc.path, span=(0, len(doc.text)), replacement="")
-                    )
-                elif node.kind == MD_HEADING:
-                    candidates.append(
-                        Edit(path=doc.path, span=node.span, replacement="")
-                    )
+
+            def _line_range(span: Tuple[int, int]) -> Tuple[int, int]:
+                s, t = span
+                before = doc.text[:s]
+                omitted = doc.text[s:t]
+                start_line = before.count("\n") + 1
+                end_line = start_line + omitted.count("\n")
+                return start_line, end_line
+
+            if node.kind == MD_DOC:
+                n_lines = doc.text.count("\n") + 1
+                marker = make_omission_line(
+                    lang="md",
+                    a=1,
+                    b=n_lines,
+                    indent="",
+                    opts=DEFAULT_OPTIONS,
+                    label="document omitted",
+                )
+                candidates.append(
+                    Edit(path=doc.path, span=(0, len(doc.text)), replacement=marker)
+                )
+
+            elif node.kind == MD_HEADING:
+                a, b = _line_range(node.span)
+                label = (
+                    f"section {node.name!r} omitted" if node.name else "section omitted"
+                )
+                marker = make_omission_line(
+                    lang="md",
+                    a=a,
+                    b=b,
+                    indent="",
+                    opts=DEFAULT_OPTIONS,
+                    label=label,
+                )
+                candidates.append(
+                    Edit(path=doc.path, span=node.span, replacement=marker)
+                )
+
         return candidates
 
 
