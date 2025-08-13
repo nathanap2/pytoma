@@ -1,11 +1,11 @@
-# Pytoma — Condense a codebase into a single, LLM-friendly text pack
+# Pytoma — Repo text rendering
 
-Pytoma turns your python repo into one concise text file.
+Pytoma condenses your python repo into one concise, LLM-friendly, text file.
 You choose **what to show** (full code, signature + docstring, partial bodies ...) **per function, class, file, or folder**. 
 
-You can configure what will be showed via a small YAML config or CLI options, and the output is a single text file divided in fenced code blocks, ideal for prompting an LLM or sharing a focused snapshot with collaborators. You can also use it to hide sensitive code snippets to protect your innovative ideas.
+You can configure what will be shown via a small YAML config or CLI options, and the output is a single text file divided in fenced code blocks, ideal for prompting an LLM or sharing a focused snapshot with collaborators. You can also use it to hide sensitive code snippets to protect your innovative ideas.
 
-Note from the author : I originally vibe-coded a basic tool for myself because chatGPT wouldn't accept more than 10 files and the file-to-prompts lib didn't allow me to hide certain sections ... but it turned out to be very handy and useful, so I refined it and it became this project.
+Note from the author : I originally vibe-coded a basic tool for myself because ChatGPT wouldn't accept more than 10 files and the files-to-prompts lib didn't allow me to hide certain sections ... but it turned out to be very handy and useful, so I refined it and it became this project.
 
 
 ---
@@ -22,7 +22,7 @@ Note from the author : I originally vibe-coded a basic tool for myself because c
 
   * Python (`.py`): granular per function/method/class.
   * Markdown (`.md`): per heading or whole document (supports `full`/`hide`).
-  * Yaml and toml will soon be added
+  * YAML will soon be added
   * A description or short extract of heavy files, ML artifacts, etc., is also to be expected
 
 ---
@@ -42,17 +42,12 @@ pip install -e .
 ## Quick Start (CLI)
 
 ```bash
-# Basic: pack a repo with defaults (same behaviour as file-to-prompt)
+# Basic: pack a repo with defaults (same behaviour as files-to-prompt)
 pytoma ./path/to/repo > PACK.txt
 
-# Apply a default policy to everything (Python/Markdown engines honor what they support)
-pytoma ./repo --default "sig+doc" > PACK.txt
-
-# Use a YAML config
+# Now we use a YAML config to customize the render (skip sections, etc.)
 pytoma ./repo --config config.yml --out PACK.txt
 
-# Verbose diagnostics in the pack (helpful when tuning rules)
-pytoma ./repo --config config.yml --verbose > PACK.txt
 ```
 
 The pack looks like:
@@ -199,7 +194,7 @@ from pathlib import Path
 from pytoma.core import Config, build_prompt
 
 cfg = Config.load(Path("config.yml"), fallback_default="full")
-text = build_prompt([Path("/abs/repo")], cfg, verbose=False)
+text = build_prompt([Path("/abs/repo")], cfg)
 Path("PACK.txt").write_text(text, encoding="utf-8")
 ```
 
@@ -217,10 +212,7 @@ Advanced:
   * `Document` with a flat list of `Node`s (module, class, function, etc.).
 * A decision step maps nodes to `Action`s (`full`, `sig+doc`, …) using the precedence above.
 * Engines render actions into concrete `Edit`s (byte spans + replacements).
-* Edits are **merged** with a single policy:
-
-  * nested overlaps → **outermost wins**,
-  * partial overlaps → error (engines must avoid conflicts).
+* Edits are **merged**.
 * The final pack concatenates per-file sections with language fences.
 
 ---
@@ -250,16 +242,15 @@ Override in `config.yml → excludes`.
 
 ## Pitfalls
 
-- **Rule order can still be tricky.** For instance, you should  put `file:*` first) if you don't want it to be erased by a rule on sig+doc.
-If a hide is mentionned after another rule that imply the same file, things may also get messy.
-I 'm looking forward to improving that soon.
-For the moment, for tricky setups, you can simply ask an LLM to draft the rules for you (from your repo tree and goals).
+- **Rule order can still be tricky** when several rules are about the same file. I'm looking forward to improving that soon. For the moment, prefer being as explicit as possible, and for tricky setups, you can simply ask an LLM to draft the rules for you (from your repo tree and goals).
+- To name a markdown section in the config file, you still **need to give the slugified version** of the section
 
 ## Roadmap
 
-* Engines for **YAML/TOML** (keys/tables granularity).
+* Engine for **YAML** (keys/tables granularity).
 * CLI flag for `DISPLAY_PATH_MODE`.
-* Heuristics to suggest rules (and possibility to condition it by a section which we want to focus on) -> may be another independent tool actually ... 
+* Propose the automatic addition of inferred rules: in particular, functions that are only called by hidden functions should probably be hidden by default.
+* Heuristics to suggest rules (and possibility to condition it by a section which we want to focus on) -> may actually become another independent tool ... 
 * ... and even smarter module targeting via **dependency graphs , embeddings**, git edit correlations, etc.
 
 

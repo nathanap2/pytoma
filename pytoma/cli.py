@@ -13,7 +13,7 @@ def main(argv=None):
     ap.add_argument(
         "--default", type=str, default="full", help="Default mode if no rule matches"
     )
-    ap.add_argument("--verbose", action="store_true", help="Diagnostic logs in output")
+
     ap.add_argument(
         "--out",
         type=pathlib.Path,

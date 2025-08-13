@@ -1,4 +1,3 @@
-# tests/test_file_no_imports.py
 import importlib
 import textwrap
 import pathlib
@@ -36,34 +35,45 @@ def test_file_no_imports_basic(tmp_path):
     cfg = core.Config(
         default="full",
         rules=[
-            core.Rule(
-                match=f"{abs_root}/*.py", mode="file:no-imports"
-            ),  # files directly under pkg
-            core.Rule(
-                match=f"{abs_root}/**/*.py", mode="file:no-imports"
-            ),  # and subfolders
+            core.Rule(match=f"{abs_root}/*.py", mode="file:no-imports"),
+            core.Rule(match=f"{abs_root}/**/*.py", mode="file:no-imports"),
         ],
         excludes=[],
     )
 
     out = core.build_prompt([pkg], cfg)
 
-    # The pack contains a section '### <path>' followed by a ```python fence
+    # The pack contains a header and a Python fence
     assert "### " in out and "```python" in out
 
-    # Top-level imports removed
-    assert "import os\n" not in out
-    assert "from math import sqrt" not in out
-    assert "from itertools import" not in out
-    assert "chain" not in out and "groupby" not in out  # multi-line removal works
+    # ---- Top-level import statements have disappeared (regex anchored) ----
+    assert not re.search(r"(?m)^\s*import\s+os\b", out)
+    assert not re.search(r"(?m)^\s*from\s+math\s+import\s+sqrt\b", out)
+    assert not re.search(r"(?m)^\s*from\s+itertools\s+import\b", out)
 
-    # __future__ kept
+    # __future__ is preserved
     assert "from __future__ import annotations" in out
 
-    # Inside-function import kept
+    # ---- Omission marker is present and informative ----
+    assert "# [imports omitted:" in out
+    # we do not assume ordering, only that key elements are present
+    assert "math.sqrt" in out
+    assert "itertools.chain" in out
+    assert "itertools.groupby" in out
+    # (Optional) check exactly 4 omitted items in this case
+    assert "[imports omitted: 4]" in out or "# [imports omitted: 4]" in out
+
+    # ---- Marker placement: after __future__, before the first def ----
+    pos_future = out.find("from __future__ import annotations")
+    pos_marker = out.find("# [imports omitted:")
+    pos_def = out.find("def f(x):")
+    assert pos_future != -1 and pos_marker != -1 and pos_def != -1
+    assert pos_future < pos_marker < pos_def
+
+    # Intra-function import is preserved
     assert "import sys  # inside-function" in out
 
-    # Function body present
+    # Function body is present (the 'os' reference remains in the text)
     assert "def f(x):" in out
     assert "return os.listdir" in out
 
@@ -87,10 +97,7 @@ def test_file_no_imports_composes_with_sig_rule(tmp_path):
         """,
     )
 
-    # 1) absolute rule on the file -> no-imports
     abs_b = b_py.resolve().as_posix()
-    # 2) rule by qualname -> signature for g
-    #    The module will be 'b' if we pass 'pkg' as root to build_prompt.
     cfg = core.Config(
         default="full",
         rules=[
@@ -102,21 +109,30 @@ def test_file_no_imports_composes_with_sig_rule(tmp_path):
 
     out = core.build_prompt([pkg], cfg)
 
-    # Top-level imports removed
-    assert "import os\n" not in out
-    assert "from math import sqrt" not in out
+    # 1) Top-level imports have disappeared (regex anchored at line start)
+    assert not re.search(r"(?m)^\s*import\s+os\b", out)
+    assert not re.search(r"(?m)^\s*from\s+math\s+import\s+sqrt\b", out)
 
-    # f stays in "full"
+    # 2) Import omission marker: appears only once and is informative
+    assert out.count("# [imports omitted:") == 1
+    assert "os" in out and "math.sqrt" in out
+
+    # 3) Placement: marker appears before the first definitions
+    pos_marker = out.find("# [imports omitted:")
+    pos_def_f = out.find("def f(x):")
+    pos_def_g = out.find("def g(y):")
+    assert pos_marker != -1 and pos_def_f != -1 and pos_def_g != -1
+    assert pos_marker < min(pos_def_f, pos_def_g)
+
+    # 4) f remains in "full"
     assert "def f(x):" in out
     assert 'return os.getenv("HOME")' in out
 
-    # g is contracted to signature + omission marker for the body
-    assert "def g(y):" in out
-
-    # Right after the signature, we expect a commented line containing "body omitted"
-    m = re.search(r"def\s+g\(y\):\s*\n([ \t]*# .+)", out)
-    assert m, "Expected an omission marker comment after 'def g(y):'"
+    # 5) g is contracted to signature + "body omitted" marker, exactly once
+    assert len(re.findall(r"(?m)^def\s+g\(y\):", out)) == 1
+    m = re.search(r"(?s)^def\s+g\(y\):\s*\n([ \t]*# .+)$", out, flags=re.M)
+    assert m, "Expected an omission marker comment right after 'def g(y):'"
     assert "body omitted" in m.group(1)
 
-    # The original body must no longer appear
+    # 6) g's original body is no longer present
     assert "return sqrt(y) + 1" not in out

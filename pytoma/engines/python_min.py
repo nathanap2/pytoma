@@ -64,7 +64,7 @@ def _visibility(name: str) -> str:
 
 
 def _decorator_to_str_py(fn_dec: cst.Decorator) -> str:
-    # Best-effort rendering (without arguments if complex call)
+    # Best-effort rendering (without arguments if it's a complex call)
     expr = fn_dec.decorator
 
     def _name(e: cst.CSTNode) -> Optional[str]:
@@ -80,24 +80,139 @@ def _decorator_to_str_py(fn_dec: cst.Decorator) -> str:
     return _name(expr) or "decorator"
 
 
-def _drop_top_level_imports(text: str, path: PurePosixPath) -> List[Edit]:
+def _format_imports_marker(
+    items: List[str], *, mode: str = "list", max_items: int = 4, max_chars: int = 120
+) -> str:
+    items = sorted(dict.fromkeys(items))
+    if mode == "count":
+        return f"# [imports omitted: {len(items)}]"
+    text = f"# [imports omitted: {len(items)}] " + ", ".join(items[:max_items])
+    if len(items) > max_items:
+        rest = len(items) - max_items
+        text += f"…(+{rest})"
+    if len(text) > max_chars:
+        return f"# [imports omitted: {len(items)}]"
+    return text
+
+
+def _compute_marker_insert_pos(source: str, tree: ast.Module, ls: List[int]) -> int:
     """
-    Remove Import/ImportFrom statements at the module level.
-    Keep 'from __future__ import ...'.
+    Insertion position = after docstring + __future__ imports + contiguous top-level import block,
+    then skip blank lines. Never before an eventual shebang.
     """
-    ls = _line_starts(text)
-    edits: List[Edit] = []
-    try:
-        t = ast.parse(text)
-    except SyntaxError:
-        return edits
-    for n in getattr(t, "body", []):
-        if isinstance(n, (ast.Import, ast.ImportFrom)):
-            if isinstance(n, ast.ImportFrom) and n.module == "__future__":
+    # 1) Respect a shebang at the top
+    shebang_end = 0
+    if source.startswith("#!"):
+        nl = source.find("\n")
+        shebang_end = len(source) if nl == -1 else nl + 1
+
+    insert_line = 1
+    body = list(tree.body)
+    j = 0
+
+    # 2) Module docstring
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(getattr(body[0], "value", None), ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        end_ln = getattr(body[0], "end_lineno", body[0].lineno)
+        insert_line = end_ln + 1
+        j = 1
+
+    # 3) All consecutive `from __future__ import ...` statements
+    while j < len(body):
+        stmt = body[j]
+        if isinstance(stmt, ast.ImportFrom) and stmt.module == "__future__":
+            end_ln = getattr(stmt, "end_lineno", stmt.lineno)
+            insert_line = end_ln + 1
+            j += 1
+        else:
+            break
+
+    # 4) All consecutive top-level imports (excluding __future__) AFTER that
+    k = j
+    while k < len(body):
+        stmt = body[k]
+        if isinstance(stmt, ast.Import) or (
+            isinstance(stmt, ast.ImportFrom) and stmt.module != "__future__"
+        ):
+            end_ln = getattr(stmt, "end_lineno", stmt.lineno)
+            insert_line = end_ln + 1
+            k += 1
+        else:
+            break
+
+    # 5) Convert to character offset, then skip blank lines
+    pos = ls[min(insert_line - 1, len(ls) - 1)]
+    i = pos
+    n = len(source)
+    while i < n:
+        line_end = source.find("\n", i)
+        if line_end == -1:
+            line_end = n
+        if source[i:line_end].strip() == "":
+            i = line_end + (1 if line_end < n else 0)
+        else:
+            break
+
+    # 6) Never insert before a shebang
+    return max(i, shebang_end)
+
+
+def _drop_top_level_imports_with_marker(source: str, path: str) -> List[Edit]:
+    tree = ast.parse(source)
+    ls = _line_starts(source)  # already defined in this module
+
+    removed_names: List[str] = []
+    delete_spans: List[Tuple[int, int]] = []
+
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Import):
+            # Imported names
+            for a in stmt.names:
+                name = a.name
+                removed_names.append(f"{name} as {a.asname}" if a.asname else name)
+            # Remove: entire line(s) of the statement
+            start = ls[stmt.lineno - 1]
+            end = ls[stmt.end_lineno] if stmt.end_lineno < len(ls) else len(source)
+            delete_spans.append((start, end))
+
+        elif isinstance(stmt, ast.ImportFrom):
+            # Keep __future__ imports
+            if stmt.module == "__future__":
                 continue
-            s = ls[n.lineno - 1]
-            e = ls[n.end_lineno]
-            edits.append(Edit(path=path, span=(s, e), replacement=""))
+            # Module, including relative imports: "." * level + (module or "")
+            mod_prefix = "." * getattr(stmt, "level", 0)
+            mod = (
+                (mod_prefix + (stmt.module or ""))
+                if (getattr(stmt, "level", 0) or stmt.module)
+                else ""
+            )
+            if len(stmt.names) == 1 and stmt.names[0].name == "*":
+                removed_names.append(f"{mod}.*" if mod else ".*")
+            else:
+                for a in stmt.names:
+                    item = f"{mod}.{a.name}" if mod else a.name
+                    removed_names.append(f"{item} as {a.asname}" if a.asname else item)
+            start = ls[stmt.lineno - 1]
+            end = ls[stmt.end_lineno] if stmt.end_lineno < len(ls) else len(source)
+            delete_spans.append((start, end))
+
+    edits: List[Edit] = [
+        Edit(path=path, span=span, replacement="") for span in delete_spans
+    ]
+
+    if not removed_names:
+        return edits  # nothing to mark
+
+    insert_pos = _compute_marker_insert_pos(source, tree, ls)
+    marker = (
+        _format_imports_marker(removed_names, mode="list", max_items=4, max_chars=120)
+        + "\n"
+    )
+    edits.append(Edit(path=path, span=(insert_pos, insert_pos), replacement=marker))
     return edits
 
 
@@ -107,7 +222,7 @@ def _drop_top_level_imports(text: str, path: PurePosixPath) -> List[Edit]:
 
 
 class _ClassVisitor(ast.NodeVisitor):
-    """Collect nested classes with qualnames and decorators."""
+    """Collect nested classes with qualified names and decorators."""
 
     def __init__(self, text: str) -> None:
         self.text = text
@@ -189,12 +304,12 @@ def _mode_of_action(a: Action) -> str | None:
 
 class PythonMinEngine:
     """
-    Function/method granularity, now as a tree (module → classes → defs).
+    Function/method granularity, structured as a tree (module → classes → defs).
     """
 
     filetypes = {"py"}
 
-    # NEW: optional hook
+    # Optional hook
     def configure(self, roots: List[Path]) -> None:
         try:
             set_module_roots(roots)
@@ -311,7 +426,7 @@ class PythonMinEngine:
         )
 
     def render(self, doc: Document, decisions: List[Tuple[Node, Action]]) -> List[Edit]:
-        # Unchanged rendering: based on FuncInfo (more robust for replacements)
+        # Rendering unchanged: based on FuncInfo (more robust for replacements)
         src, funcs = _collect_funcs(doc.text, Path(doc.path))
         ls = _line_starts(doc.text)
         by_qual: Dict[str, FuncInfo] = {fi.qualname: fi for fi in funcs}
@@ -320,7 +435,9 @@ class PythonMinEngine:
         for node, action in decisions:
             # --- file-level filters ---
             if node.kind == PY_MODULE and action.kind == "file:no-imports":
-                candidates.extend(_drop_top_level_imports(doc.text, doc.path))
+                candidates.extend(
+                    _drop_top_level_imports_with_marker(doc.text, doc.path)
+                )
                 continue
 
             mode = _mode_of_action(action)
