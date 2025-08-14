@@ -218,24 +218,4 @@ Planned: YAML/TOML section policies (toml already started)
 
 ## License
 
-MIT 
-
----
-
-## FAQ
-
-**Q: Can I hide a whole file?**
-Yes: `mode: "hide"` on the file path glob. You’ll get a single omission marker for the module.
-
-**Q: Can I strip imports but keep function bodies?**
-Yes: chain two rules on the same glob—first `file:no-imports`, then `sig`/`full`/`levels`, etc.
-
-**Q: Do rules need to be ordered?**
-Prefer placing `file:*` rules **before** function/method rules on the same path glob. Qualname rules are checked first anyway.
-
-**Q: What happens to docstrings in `body:levels=k`?**
-If a docstring falls in an omitted range, it’s re-inserted above the kept code for readability.
-
-**Q: Can I get relative paths in headers?**
-Yes: set `DISPLAY_PATH_MODE = "strip"` in `core.py` (default in our dev builds). (will be parametrized soon)
-
+[MIT](LICENCE)

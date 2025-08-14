@@ -50,19 +50,6 @@ def header_one_line(func: FuncInfo, src: List[str]) -> str:
     return _ensure_trailing_nl(content)
 
 
-def signature_compact(node) -> str:
-    """
-    Historical compatibility: some older renderers relied on a synthetic
-    "compact signature". Here we rely on header_one_line which faithfully
-    reflects the source signature.
-    """
-    # This function is kept for backward compatibility; new code paths
-    # use header_one_line(fi, src).
-    # We produce a minimal 'def name(...):' when no source is available.
-    name = getattr(getattr(node, "name", None), "value", None) or "function"
-    return f"def {name}(...):\n"
-
-
 def compute_body_range(func: FuncInfo) -> Optional[Tuple[int, int]]:
     """
     Return inclusive (start_line, end_line) for the function body.
