@@ -1,5 +1,5 @@
 import pytest
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from pytoma.ir import Edit
 from pytoma.edits import merge_edits, apply_edits_preview
 
@@ -77,3 +77,35 @@ def test_apply_preview_rejects_partial_overlap(tmp_path):
     ]
     with pytest.raises(ValueError):
         apply_edits_preview(edits)
+        
+
+
+
+def test_merge_edits_outermost_and_insertions():
+    p = PurePosixPath("x.py")
+    # One outer deletion [10,20), one fully-contained deletion [12,15), and two insertions
+    outer = Edit(path=p, span=(10, 20), replacement="")
+    inner = Edit(path=p, span=(12, 15), replacement="")
+    ins_inside = Edit(path=p, span=(14, 14), replacement="# INS\n")
+    ins_before = Edit(path=p, span=(0, 0), replacement="# BOF\n")
+
+    merged = merge_edits([inner, outer, ins_inside, ins_before])
+
+    # After merge:
+    # - only 'outer' survives among deletions
+    # - insertion inside is shifted to 20
+    # - insertion at 0 stays at 0
+    spans = [(e.span[0], e.span[1]) for e in merged if Path(e.path).name == "x.py"]
+    assert (10, 20) in spans
+    assert (0, 0) in spans
+    assert (20, 20) in spans
+    assert (12, 15) not in spans  # inner deletion dropped
+
+
+def test_merge_edits_partial_overlap_raises():
+    p = PurePosixPath("x.py")
+    a = Edit(path=p, span=(10, 20), replacement="")
+    b = Edit(path=p, span=(15, 25), replacement="")
+    with pytest.raises(ValueError):
+        merge_edits([a, b])
+

@@ -6,10 +6,23 @@ from typing import Dict, Iterable, List
 from .ir import Edit
 
 
+
+from collections import defaultdict
+from pathlib import Path
+from typing import Dict, Iterable, List, Tuple
+
+from .ir import Edit
+
 def merge_edits(edits: Iterable[Edit]) -> List[Edit]:
     """
-    Policy: outermost wins for nested overlaps; partial overlap -> ValueError.
-    Merges independently per file and returns a globally ordered list.
+    Merge policy:
+      - Per file, merge deletions/modifications (spans with t > s) using the
+        "outermost wins" rule (an edit fully contained by another is dropped;
+        partial overlap -> error).
+      - Insertions (spans with t == s) are processed afterwards: if an insertion
+        falls inside a kept deletion span, move it to the right edge of that deletion
+        (i.e., to the 'end' position).
+      - Returns a list globally ordered by path, then by start offset.
     """
     by_path: Dict[Path, List[Edit]] = defaultdict(list)
     for e in edits:
@@ -18,21 +31,58 @@ def merge_edits(edits: Iterable[Edit]) -> List[Edit]:
     merged_all: List[Edit] = []
     for path in sorted(by_path.keys(), key=lambda p: p.as_posix()):
         group = by_path[path]
-        ordered = sorted(group, key=lambda e: (e.span[0], -e.span[1]))
+
+        # 1) Separate deletions/updates from insertions
+        deletes: List[Edit] = []
+        inserts: List[Edit] = []
+        for e in group:
+            s, t = e.span
+            if t > s:
+                deletes.append(e)
+            elif t == s:
+                inserts.append(e)
+            else:
+                raise ValueError(f"Invalid span (end < start) on {path.as_posix()}: {e.span}")
+
+        # 2) Merge deletions/updates: outermost wins
+        ordered_del = sorted(deletes, key=lambda e: (e.span[0], -e.span[1]))
         kept: List[Edit] = []
-        for e in ordered:
+        for e in ordered_del:
             s, t = e.span
             if kept:
                 ks, kt = kept[-1].span
                 if s < kt:
                     if t <= kt:
-                        continue  # fully contained -> drop current
+                        # fully contained: drop e
+                        continue
+                    # partial overlap: invalid
                     raise ValueError(
                         f"Overlapping edits on {path.as_posix()}: {(ks, kt)} vs {(s, t)}"
                     )
             kept.append(e)
+
+        # 3) Normalize insertions: push to the right edge if inside a deletion
+        norm_inserts: List[Edit] = []
+        for ins in sorted(inserts, key=lambda e: e.span[0]):
+            p = ins.span[0]
+            for d in kept:
+                s, t = d.span
+                if s <= p <= t:
+                    p = t
+            if p != ins.span[0]:
+                norm_inserts.append(Edit(path=ins.path, span=(p, p),
+                                         replacement=ins.replacement, comment=ins.comment))
+            else:
+                norm_inserts.append(ins)
+
+        # 4) Concatenate (deterministic order within the file)
         merged_all.extend(kept)
+        merged_all.extend(norm_inserts)
+
+    # 5) Deterministic global order (by file, then by offset)
+    merged_all.sort(key=lambda e: (Path(e.path).as_posix(), e.span[0], e.span[1]))
     return merged_all
+
 
 
 def _apply_edits_to_text(text: str, edits: List[Edit]) -> str:

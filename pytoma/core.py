@@ -1,19 +1,17 @@
 import pathlib, re
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Tuple
+import importlib
 
 import yaml
 
+from pathlib import Path
+
 from .scan import iter_files
 from .edits import apply_edits_preview, merge_edits
-from .base import get_engine_for
 from .policies import Action, to_action, validate_mode
 from .ir import Edit, Document, Node, PY_MODULE, MD_DOC
 
-# load engines (side-effect: register_engine)
-from .engines import python_min  # noqa: F401
-from .engines import markdown_min  # noqa: F401
-from .engines import toml_min  # noqa: F401
 
 from .pre_resolution import pre_resolve_path_rules
 
@@ -26,6 +24,54 @@ from .config import Config, Rule
 
 DISPLAY_PATH_MODE = "strip"  # or "absolute"
 
+_ENGINES = {}
+
+
+# --- Lazy engine loader (no side effects) ------------------------------------
+# Mapping extension -> "module:factory"; the factory must return an Engine instance.
+_ENGINE_FACTORY_BY_EXT: Dict[str, str] = {
+    "py":   "pytoma.engines.python_engine:create_engine",   # choose ONE implementation
+    "md":   "pytoma.engines.markdown_engine:create_engine",
+    "toml": "pytoma.engines.toml_engine:create_engine",
+}
+_LOADED_EXTS: set[str] = set()  # extensions we attempted to load
+
+def _register_engine_instance(engine) -> None:
+    # Registers the instance for all of its declared extensions
+    for ext in getattr(engine, "filetypes", []):
+        key = ext.lower().lstrip(".")
+        _ENGINES[key] = engine
+
+def _ensure_engine_loaded_for(ext: str) -> None:
+    """
+    Explicitly load the factory defined for 'ext', instantiate the engine,
+    and register it — without relying on import-time side effects.
+    """
+    if ext in _ENGINES or ext in _LOADED_EXTS:
+        return
+    spec = _ENGINE_FACTORY_BY_EXT.get(ext)
+    _LOADED_EXTS.add(ext)
+    if not spec:
+        return  # no factory defined for this extension
+    mod_name, _, factory_name = spec.partition(":")
+    if not factory_name:
+        factory_name = "create_engine"
+    try:
+        mod = importlib.import_module(mod_name)
+        factory = getattr(mod, factory_name)
+        engine = factory()
+        _register_engine_instance(engine)
+    except Exception:
+        return
+
+
+
+
+
+
+
+def get_engine_for(path: Path):
+    return _ENGINES.get(path.suffix.lower().lstrip("."))
 
 def _display_path(path: pathlib.Path, roots: list[pathlib.Path]) -> str:
     """
@@ -126,6 +172,7 @@ def _fence_lang_for(path: pathlib.Path) -> str:
 
 
 def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
+
     out: List[str] = []
 
     # Resolve conflicts in config
@@ -142,6 +189,12 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
         iter_files(paths, includes=("**/*",), excludes=(cfg.excludes or []))
     )
     discovered.sort(key=lambda p: p.as_posix())
+    
+    
+    needed_exts = {p.suffix.lower().lstrip(".") for p in discovered}
+    for ext in sorted(needed_exts):
+        _ensure_engine_loaded_for(ext)
+
 
     all_edits: List[Edit] = []
     eligible: List[pathlib.Path] = []

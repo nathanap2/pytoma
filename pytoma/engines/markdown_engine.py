@@ -5,7 +5,6 @@ import unicodedata
 
 from ..ir import Document, Node, Edit, MD_DOC, MD_HEADING, assign_ids, flatten
 from ..policies import Action
-from ..base import register_engine
 
 from ..markers import DEFAULT_OPTIONS, make_omission_line
 
@@ -228,5 +227,5 @@ class MarkdownMinEngine:
 
         return candidates
 
-
-register_engine(MarkdownMinEngine())
+def create_engine():
+    return MarkdownMinEngine()

@@ -1,10 +1,8 @@
-# pytoma/engines/toml_min.py
-from __future__ import annotations
+
 from pathlib import Path, PurePosixPath
 from typing import List, Tuple
 import re
 
-from ..base import register_engine
 from ..ir import Node, Document, assign_ids, flatten, Edit, TOML_DOC, TOML_TABLE
 from ..markers import make_omission_line, DEFAULT_OPTIONS
 
@@ -153,5 +151,7 @@ class TomlMinEngine:
                     )
         return edits
 
+def create_engine():
+    return TomlMinEngine()
 
-register_engine(TomlMinEngine())
+

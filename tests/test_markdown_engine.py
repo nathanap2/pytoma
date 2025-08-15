@@ -10,7 +10,7 @@ from pytoma.markers import make_omission_line, DEFAULT_OPTIONS
 
 # -- Import the module to test (tolerates two possible organizations) --
 try:
-    _engines_mod = importlib.import_module("pytoma.engines.markdown_min")
+    _engines_mod = importlib.import_module("pytoma.engines.markdown_engine")
 except ImportError:
     _engines_mod = importlib.import_module("engines.markdown_min")
 
