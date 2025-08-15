@@ -15,28 +15,59 @@ from ..ir import assign_ids, flatten
 # Utils + module roots
 # ---------------------------
 
-_MODULE_ROOTS: List[Path] = []
+
+_MODULE_ROOTS: List[Path] = []  # normalized and sorted, shallow → deep
+
+
+def _depth(p: Path) -> int:
+    """Return the path depth (number of components) after resolving symlinks."""
+    return len(p.resolve().parts)
 
 
 def set_module_roots(roots: List[Path]) -> None:
+    """
+    Register module roots in a deterministic, order-independent way:
+    - resolve to absolute paths,
+    - deduplicate,
+    - sort by ascending depth so shallower roots come first.
+    This makes module name resolution stable regardless of the order
+    in which roots are provided to the CLI.
+    """
     global _MODULE_ROOTS
-    _MODULE_ROOTS = [r.resolve() for r in roots]
+    seen: dict[Path, Path] = {}
+    for r in roots:
+        rr = r.resolve()
+        seen[rr] = rr  # dedupe by resolved absolute path
+    _MODULE_ROOTS = sorted(seen.values(), key=_depth)
 
 
 def _module_name(path: Path) -> str:
+    """
+    Derive a dotted Python module name for `path` by selecting the
+    *shallowest* registered root that contains it. This removes any
+    dependency on the order of the provided roots.
+
+    Fallback: if no root contains `path`, derive the name from the
+    filesystem path itself (old behavior).
+    """
+    best: Optional[Path] = None
     for root in _MODULE_ROOTS:
         try:
             path.relative_to(root)
         except ValueError:
             continue
-        return file_to_module_name(path, root)
-    # Fallback when 'path' is not under any configured root
+        if best is None or _depth(root) < _depth(best):
+            best = root
+
+    if best is not None:
+        return file_to_module_name(path, best)
+
+    # Fallback when `path` is not under any configured root.
     p = path.with_suffix("")
     parts = list(p.parts)
     if parts and parts[-1] == "__init__":
         parts = parts[:-1]
     return ".".join(parts)
-
 
 def _line_starts(text: str) -> List[int]:
     starts = [0]
