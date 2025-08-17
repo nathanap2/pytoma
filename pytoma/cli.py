@@ -100,20 +100,15 @@ def main(argv=None) -> int:
 
     cfg = Config.load(args.config, args.default)
 
-    file_list = _discover_files(args.paths)
 
-    _debug("post-discover: n_files=", len(file_list))
+    text = build_prompt(args.paths, cfg)
 
-
-    text = build_prompt(file_list, cfg)
     _debug("post-build_prompt: out_len=", len(text) if isinstance(text, str) else "<?>")
  
-
     if args.out:
-        # If build_prompt returned an empty string (edge case), stay consistent:
-        if not text.strip():
-            _debug("empty-output: writing sentinel to file")
-            args.out.write_text("# (no files found)\n", encoding="utf-8")
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        payload = text if text.strip() else "# (no files found)\n"
+        args.out.write_text(payload, encoding="utf-8")
         return 0
     else:
         if text.strip():

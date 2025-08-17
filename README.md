@@ -30,12 +30,8 @@ Note from the author : I originally vibe-coded a basic tool for myself because C
 ## Installation
 
 ```bash
-# For now, in a freshly cloned version of pytoma : 
-pip install -e .
-# There will be a more official release soon
+pip install pytoma
 ```
-
-> Requires Python ≥ 3.9 (uses `ast.unparse`) and the following deps: `libcst`, `pyyaml`.
 
 ---
 
