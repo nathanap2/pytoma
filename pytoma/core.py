@@ -18,10 +18,16 @@ from .pre_resolution import pre_resolve_path_rules
 from .config import Config, Rule
 
 
+
+
+import os, sys
+def _debug(*parts):
+    if os.environ.get("PYTOMA_DEBUG"):
+        sys.stderr.write("[pytoma:debug:core] " + " ".join(map(str, parts)) + "\n")
+
 # --- Display options ---
 # "absolute": shows the absolute path
 # "strip"   : shows the path relative to the provided root (the deepest one if multiple)
-
 DISPLAY_PATH_MODE = "strip"  # or "absolute"
 
 _ENGINES = {}
@@ -139,14 +145,14 @@ def _qual_candidates(node: Node, roots: list[pathlib.Path]) -> list[str]:
 def _decide_for_node(
     node: Node, cfg: Config, path_candidates: list[str], roots: list[pathlib.Path]
 ) -> Action:
-    # 1) qualname rules (now tested against relative/absolute variants)
+    # 1) Qualname rules (now tested against relative/absolute variants)
     if node.qual:
         qvars = _qual_candidates(node, roots)
         for r in cfg.rules or []:
             if ":" in r.match and any(fnmatchcase(q, r.match) for q in qvars):
                 return to_action(r.mode)
 
-    # 2) path rules (same as yours, on ABS + REL + basename/REL)
+    # 2) Path rules (same as yours, on ABS + REL + basename/REL)
     for r in cfg.rules or []:
         if ":" not in r.match and any(fnmatchcase(c, r.match) for c in path_candidates):
             a = to_action(r.mode)
@@ -156,7 +162,7 @@ def _decide_for_node(
                 continue
             return a
 
-    # 3) default
+    # 3) Default
     return to_action(cfg.default)
 
 
@@ -172,49 +178,69 @@ def _fence_lang_for(path: pathlib.Path) -> str:
 
 
 def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
+    _debug("start", "n_files=", len(paths), "default=", getattr(cfg, "default", None))
 
     out: List[str] = []
 
-    # Resolve conflicts in config
+    # 1) Resolve potential conflicts in the config
     cfg, warns = pre_resolve_path_rules(cfg)
 
-    # Roots: dirs that contain the provided paths
-    roots: List[pathlib.Path] = []
+    # 2) Normalize inputs + expand directories only
+    norm_inputs: List[pathlib.Path] = []
     for p in paths:
-        p = p.resolve()
-        roots.append(p if p.is_dir() else p.parent)
+        pp = p if isinstance(p, pathlib.Path) else pathlib.Path(p)
+        norm_inputs.append(pp.resolve())
 
-    # Generic discovery
-    discovered = list(
-        iter_files(paths, includes=("**/*",), excludes=(cfg.excludes or []))
-    )
-    discovered.sort(key=lambda p: p.as_posix())
-    
-    
+    roots: List[pathlib.Path] = []
+    discovered: List[pathlib.Path] = []
+
+    for p in norm_inputs:
+        if p.is_dir():
+            roots.append(p)
+            # expand directories only: same extensions as the CLI
+            for f in iter_files([p], includes=("**/*.py", "**/*.md", "**/*.toml"),
+                                excludes=(cfg.excludes or [])):
+                discovered.append(f.resolve())
+        elif p.is_file():
+            roots.append(p.parent)
+            discovered.append(p)
+        else:
+            # nonexistent path: silently ignore (same policy as the CLI)
+            continue
+
+    # dedup + deterministic sort
+    dedup: Dict[str, pathlib.Path] = {q.as_posix(): q for q in discovered}
+    discovered = sorted(dedup.values(), key=lambda q: q.as_posix())
+
+    # 3) Lazy loading of required engines (if your infra requires it)
     needed_exts = {p.suffix.lower().lstrip(".") for p in discovered}
     for ext in sorted(needed_exts):
         _ensure_engine_loaded_for(ext)
-
 
     all_edits: List[Edit] = []
     eligible: List[pathlib.Path] = []
     docs_text: Dict[pathlib.Path, str] = {}
 
-    # parse -> decide -> edits
+    # 4) parse -> decide -> render
     for path in discovered:
         engine = get_engine_for(path)
+        _debug("route", str(path), "engine=", getattr(engine, "__name__", repr(engine)))
         if not engine:
+            _debug("skip-noengine", str(path))
             continue
 
-        # Optional hook
+        # Optional configuration hook for the engine (e.g., project roots)
         configure = getattr(engine, "configure", None)
         if callable(configure):
             try:
-                configure([r.resolve() for r in roots])
+                # pass resolved (and deduplicated) roots to the engine
+                cfg_roots = sorted({r.resolve().as_posix(): r.resolve() for r in roots}.values(),
+                                   key=lambda r: r.as_posix())
+                configure(cfg_roots)
             except Exception:
                 pass
 
-        # Read the text only once (files handled by an engine)
+        # Read the text once for files supported by an engine
         text = path.read_text(encoding="utf-8")
         docs_text[path] = text
         eligible.append(path)
@@ -232,14 +258,14 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
 
         all_edits.extend(engine.render(doc, decisions))
 
-    # resolve overlaps globally before preview
+    # 5) Global resolution of overlaps before preview
     all_edits = merge_edits(all_edits)
 
-    # preview
+    # 6) Preview (apply edits)
     previews: Dict[pathlib.Path, str] = apply_edits_preview(all_edits)
 
-    # pack — only eligible files (handled by an engine),
-    # and without re-reading from disk (reuse docs_text)
+    # 7) Packing: only "eligible" files (handled by an engine),
+    # reusing docs_text to avoid a second disk read
     for path in eligible:
         shown = previews.get(path, docs_text[path])
         lang = _fence_lang_for(path)
@@ -247,4 +273,7 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
         display = _display_path(path, roots)
         out.append(f"\n### {display}\n\n{fence}\n{shown}\n```\n")
 
+    _debug("done")
+
     return "# (no files found)\n" if not out else "".join(out)
+
