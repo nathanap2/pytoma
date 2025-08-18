@@ -36,8 +36,6 @@ Homepage = "https://github.com/nathanap2/pytoma"
 [project.scripts]
 pytoma = "pytoma.cli:main"
 
-[project.optional-dependencies]
-md = ["markdown-it-py>=3.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["pytoma"]

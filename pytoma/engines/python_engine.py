@@ -10,10 +10,7 @@ from ..render import _replacement_for_mode  # existing Python rendering
 from ..markers import make_omission_line, DEFAULT_OPTIONS
 from ..collect import FuncCollector, FuncInfo, file_to_module_name
 from ..ir import assign_ids, flatten
-
-# ---------------------------
-# Utils + module roots
-# ---------------------------
+from ..utils import line_starts
 
 
 _MODULE_ROOTS: List[Path] = []  # normalized and sorted, shallow → deep
@@ -70,9 +67,6 @@ def _module_name(path: Path) -> str:
     return ".".join(parts)
 
 
-from ..utils import line_starts
-
-
 def _line_span_to_char_span(
     ls: List[int], start_line: int, end_line: int
 ) -> Tuple[int, int]:
@@ -119,11 +113,6 @@ def _format_imports_marker(
     if len(text) > max_chars:
         return f"# [imports omitted: {len(items)}]"
     return text
-
-
-# ---------------------------
-# libcst-based helpers for imports & classes
-# ---------------------------
 
 
 def _code_for(mod: cst.Module, node: cst.CSTNode) -> str:
@@ -331,11 +320,6 @@ def _drop_top_level_imports_with_marker_cst(
     return edits
 
 
-# ---------------------------
-# Classes via libcst → (qual, span, parent, decorators)
-# ---------------------------
-
-
 class _ClassCollectorCST(cst.CSTVisitor):
     def __init__(self, positions: metadata.PositionProvider, ls: List[int]) -> None:
         self.positions = positions
@@ -376,11 +360,6 @@ class _ClassCollectorCST(cst.CSTVisitor):
         self.stack.pop()
 
 
-# ---------------------------
-# Collect FuncInfo via libcst (and expose module & positions)
-# ---------------------------
-
-
 def _collect_funcs(
     text: str, path: Path
 ) -> Tuple[List[str], List[FuncInfo], cst.Module, metadata.PositionProvider]:
@@ -408,11 +387,6 @@ def _mode_of_action(a: Action) -> Optional[str]:
         kk = int(a.params.get("k", 1))
         return f"body:levels={kk}"
     return None
-
-
-# ---------------------------
-# Engine
-# ---------------------------
 
 
 class PythonMinEngine:

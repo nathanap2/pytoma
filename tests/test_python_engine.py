@@ -105,7 +105,9 @@ def test_sigdoc_function_keeps_header_and_doc_omits_body(tmp_path: Path):
     )
     engine.configure([tmp_path])
     doc = engine.parse(tmp_path / "mod.py", src)
-    fn = next(n for n in doc.nodes if n.kind in {PY_FUNCTION, PY_METHOD} and n.name == "foo")
+    fn = next(
+        n for n in doc.nodes if n.kind in {PY_FUNCTION, PY_METHOD} and n.name == "foo"
+    )
     decisions = [(fn, Action("sig+doc"))]
 
     new_text, _ = _apply(engine, tmp_path, src, decisions)
@@ -131,7 +133,9 @@ def test_levels_k1_omits_deeper_indentation(tmp_path: Path):
     )
     engine.configure([tmp_path])
     doc = engine.parse(tmp_path / "mod.py", src)
-    fn = next(n for n in doc.nodes if n.kind in {PY_FUNCTION, PY_METHOD} and n.name == "h")
+    fn = next(
+        n for n in doc.nodes if n.kind in {PY_FUNCTION, PY_METHOD} and n.name == "h"
+    )
     decisions = [(fn, Action("levels", {"k": 1}))]
 
     new_text, _ = _apply(engine, tmp_path, src, decisions)
@@ -142,4 +146,3 @@ def test_levels_k1_omits_deeper_indentation(tmp_path: Path):
     assert "b = 2" in new_text
     assert "c = 3" not in new_text
     assert "omitted" in new_text  # omission marker inserted
-

@@ -1,24 +1,18 @@
-import pathlib, re
-from dataclasses import dataclass
-from typing import Optional, List, Dict, Tuple
+from __future__ import annotations
+
 import importlib
-
-import yaml
-
+import os
+import sys
+import pathlib
 from pathlib import Path
+from typing import List, Dict, Tuple
 
 from .scan import iter_files
 from .edits import apply_edits_preview, merge_edits
-from .policies import Action, to_action, validate_mode
-from .ir import Edit, Document, Node, PY_MODULE, MD_DOC
-
-
+from .policies import Action, to_action
+from .ir import Edit, Document, Node, PY_MODULE, MD_DOC, TOML_DOC
 from .pre_resolution import pre_resolve_path_rules
-
 from .config import Config, Rule
-
-import os, sys
-
 from .log import debug
 
 
@@ -27,21 +21,22 @@ from .log import debug
 # "strip"   : shows the path relative to the provided root (the deepest one if multiple)
 DISPLAY_PATH_MODE = "strip"  # or "absolute"
 
-_ENGINES = {}
-
+# Registered engine instances by extension (e.g. "py" -> PythonMinEngine instance)
+_ENGINES: Dict[str, object] = {}
 
 # --- Lazy engine loader (no side effects) ------------------------------------
 # Mapping extension -> "module:factory"; the factory must return an Engine instance.
 _ENGINE_FACTORY_BY_EXT: Dict[str, str] = {
-    "py": "pytoma.engines.python_engine:create_engine",  # choose ONE implementation
+    "py": "pytoma.engines.python_engine:create_engine",
     "md": "pytoma.engines.markdown_engine:create_engine",
     "toml": "pytoma.engines.toml_engine:create_engine",
 }
 _LOADED_EXTS: set[str] = set()  # extensions we attempted to load
+_ENGINE_LOAD_ERRORS: Dict[str, str] = {}  # ext -> concise failure reason
 
 
 def _register_engine_instance(engine) -> None:
-    # Registers the instance for all of its declared extensions
+    """Register a single engine instance for all of its declared filetypes."""
     for ext in getattr(engine, "filetypes", []):
         key = ext.lower().lstrip(".")
         _ENGINES[key] = engine
@@ -49,28 +44,32 @@ def _register_engine_instance(engine) -> None:
 
 def _ensure_engine_loaded_for(ext: str) -> None:
     """
-    Explicitly load the factory defined for 'ext', instantiate the engine,
-    and register it — without relying on import-time side effects.
+    Try to load and register the engine for 'ext'. Record the reason on failure.
+    Never raises here; enforcement happens after discovery in build_prompt().
     """
-    if ext in _ENGINES or ext in _LOADED_EXTS:
+    key = (ext or "").lstrip(".").lower()
+    if not key or key in _ENGINES or key in _LOADED_EXTS:
         return
-    spec = _ENGINE_FACTORY_BY_EXT.get(ext)
-    _LOADED_EXTS.add(ext)
+
+    _LOADED_EXTS.add(key)
+    spec = _ENGINE_FACTORY_BY_EXT.get(key)
     if not spec:
-        return  # no factory defined for this extension
+        _ENGINE_LOAD_ERRORS[key] = "no engine factory registered for this extension"
+        return
+
     mod_name, _, factory_name = spec.partition(":")
-    if not factory_name:
-        factory_name = "create_engine"
+    factory_name = factory_name or "create_engine"
     try:
         mod = importlib.import_module(mod_name)
         factory = getattr(mod, factory_name)
         engine = factory()
         _register_engine_instance(engine)
-    except Exception:
-        return
+    except Exception as e:
+        _ENGINE_LOAD_ERRORS[key] = f"{type(e).__name__}: {e!s}"
 
 
 def get_engine_for(path: Path):
+    """Return the engine instance registered for the file's extension, if any."""
     return _ENGINES.get(path.suffix.lower().lstrip("."))
 
 
@@ -81,7 +80,6 @@ def _display_path(path: pathlib.Path, roots: list[pathlib.Path]) -> str:
       Falls back to absolute if no root contains 'path'.
     - In "absolute" mode: POSIX absolute path.
     """
-
     p = path.resolve()
     if DISPLAY_PATH_MODE != "strip":
         return p.as_posix()
@@ -108,6 +106,11 @@ def fnmatchcase(s: str, pat: str) -> bool:
 
 
 def _path_candidates(path: pathlib.Path, roots: list[pathlib.Path]) -> list[str]:
+    """
+    Produce candidate strings for matching a path rule:
+    - absolute POSIX path
+    - for each root that contains the path: relative path and "basename(root)/relative"
+    """
     abs_posix = path.as_posix()
     cands = [abs_posix]
     for r in roots:
@@ -117,42 +120,50 @@ def _path_candidates(path: pathlib.Path, roots: list[pathlib.Path]) -> list[str]
             continue
         cands.append(rel)
         if r.name and rel:
-            cands.append(f"{r.name}/{rel}")  # <--- NEW
+            cands.append(f"{r.name}/{rel}")
     return list(dict.fromkeys(cands))
 
 
 def _qual_candidates(node: Node, roots: list[pathlib.Path]) -> list[str]:
     """
-    Return variants of node.qual where the 'path' part (before ':')
-    is rewritten as absolute, relative to each root, and 'basename(root)/rel'.
+    Construit des variantes de node.qual :
+    - la qualname originale (module ou chemin selon l'engine),
+    - puis des variantes où la partie "avant ':'" est réécrite en chemins
+      (absolu, relatif à chaque root, basename(root)/rel), basées sur node.path.
     """
     if not node.qual or ":" not in node.qual:
         return [node.qual] if node.qual else []
-    path_str, rest = node.qual.split(":", 1)
-    p = pathlib.Path(path_str)
-    cands = []
-    for c in _path_candidates(p, roots):  # reuse your existing helper
+
+    # Séparer mais ne pas convertir ce qui est avant ":" en chemin
+    _before, rest = node.qual.split(":", 1)
+
+    cands = [node.qual]
+
+    # Utiliser le vrai chemin fichier du nœud pour générer les variantes chemin
+    p = pathlib.Path(node.path)
+    for c in _path_candidates(p, roots):
         cands.append(f"{c}:{rest}")
-    # deduplicate while preserving order
+
+    # dédupe en conservant l'ordre
     return list(dict.fromkeys(cands))
 
 
 def _decide_for_node(
     node: Node, cfg: Config, path_candidates: list[str], roots: list[pathlib.Path]
 ) -> Action:
-    # 1) Qualname rules (now tested against relative/absolute variants)
+    # 1) Qualname rules (tested against relative/absolute variants)
     if node.qual:
         qvars = _qual_candidates(node, roots)
         for r in cfg.rules or []:
             if ":" in r.match and any(fnmatchcase(q, r.match) for q in qvars):
                 return to_action(r.mode)
 
-    # 2) Path rules (same as yours, on ABS + REL + basename/REL)
+    # 2) Path rules (on ABS + REL + basename/REL)
     for r in cfg.rules or []:
         if ":" not in r.match and any(fnmatchcase(c, r.match) for c in path_candidates):
             a = to_action(r.mode)
             if a.kind.startswith("file:"):
-                if node.kind in {PY_MODULE, MD_DOC}:  # add TOML_DOC if needed
+                if node.kind in {PY_MODULE, MD_DOC, TOML_DOC}:
                     return a
                 continue
             return a
@@ -182,6 +193,9 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
 
     # 1) Resolve potential conflicts in the config
     cfg, warns = pre_resolve_path_rules(cfg)
+    if warns:
+        for w in warns:
+            debug(("pre_resolve", w), tag="core")
 
     # 2) Normalize inputs + expand directories only
     norm_inputs: List[pathlib.Path] = []
@@ -204,7 +218,7 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
                 discovered.append(f.resolve())
         elif p.is_file():
             roots.append(p.parent)
-            discovered.append(p)
+            discovered.append(p.resolve())
         else:
             # nonexistent path: silently ignore (same policy as the CLI)
             continue
@@ -213,10 +227,23 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
     dedup: Dict[str, pathlib.Path] = {q.as_posix(): q for q in discovered}
     discovered = sorted(dedup.values(), key=lambda q: q.as_posix())
 
-    # 3) Lazy loading of required engines (if your infra requires it)
-    needed_exts = {p.suffix.lower().lstrip(".") for p in discovered}
+    # 3) Lazy load required engines
+    needed_exts = {p.suffix.lower().lstrip(".") for p in discovered if p.suffix}
     for ext in sorted(needed_exts):
         _ensure_engine_loaded_for(ext)
+
+    missing = sorted(e for e in needed_exts if e and e not in _ENGINES)
+    if missing:
+        details = ", ".join(
+            f".{e} → {_ENGINE_LOAD_ERRORS.get(e, 'unknown cause')}" for e in missing
+        )
+        raise RuntimeError(
+            "No engine available for discovered extension(s): "
+            f"{details}\n\nHints:\n"
+            " • Install the corresponding engine or its dependencies "
+            "(e.g. `pip install markdown-it-py` for Markdown).\n"
+            " • Or exclude those files in config.yml → excludes (e.g. '**/*.md')."
+        )
 
     all_edits: List[Edit] = []
     eligible: List[pathlib.Path] = []
@@ -230,6 +257,8 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
             tag="core",
         )
         if not engine:
+            # Should not happen in strict mode (we already enforced above),
+            # but keep a defensive skip in case of race conditions.
             debug(("skip-noengine", str(path)), tag="core")
             continue
 
@@ -252,11 +281,9 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
         eligible.append(path)
 
         doc: Document = engine.parse(path, text)
-        path_posix = path.as_posix()
         decisions: List[Tuple[Node, Action]] = []
 
         cands = _path_candidates(path, roots)
-
         for node in doc.nodes:
             a = _decide_for_node(node, cfg, cands, roots)
             if engine.supports(a):
@@ -280,5 +307,4 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
         out.append(f"\n### {display}\n\n{fence}\n{shown}\n```\n")
 
     debug(("done",), tag="core")
-
     return "# (no files found)\n" if not out else "".join(out)

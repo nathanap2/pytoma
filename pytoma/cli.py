@@ -1,4 +1,3 @@
-# pytoma/cli.py
 from __future__ import annotations
 
 import argparse
@@ -12,8 +11,6 @@ from .log import debug
 from .config import Config
 from .core import build_prompt, _display_path, get_engine_for, _ensure_engine_loaded_for
 from .scan import iter_files
-
-DEFAULT_INCLUDES: tuple[str, ...] = ("**/*.py", "**/*.md", "**/*.toml")
 
 
 def _get_version_string() -> str:
@@ -57,42 +54,61 @@ def _load_engines_for(exts: Iterable[str]) -> None:
 def _run_scan(
     roots: List[Path],
     *,
-    includes: List[str],
-    excludes: List[str],
+    cfg: Config,
     show_abs: bool,
     show_engine: bool,
 ) -> int:
     """
-    Perform a discovery-only run (no rendering), printing found files.
-    - Respects include/exclude patterns.
-    - Optionally prints which engine would handle each file.
+    Discovery-only, but mirrors core.build_prompt:
+      - if an input is a directory: iter_files(dir, includes=py/md/toml, excludes=cfg.excludes)
+      - if an input is a file: include it directly and use its parent as a root
+      - deduplicate + deterministic sort
+      - same display path logic relative to the deepest matching root
     """
-    roots = [p.resolve() for p in roots]
-    debug("scan:roots", [r.as_posix() for r in roots], tag="cli")
-    debug("scan:includes", includes, tag="cli")
-    debug("scan:excludes", excludes, tag="cli")
+    # 1) Normalise inputs
+    inputs = [p.resolve() for p in roots]
 
-    files: List[Path] = []
-    for f in iter_files(roots, includes=includes, excludes=excludes):
-        files.append(f.resolve())
+    # 2) Discover files exactly like core
+    display_roots: List[Path] = []
+    discovered: List[Path] = []
+    for p in inputs:
+        if p.is_dir():
+            display_roots.append(p)
+            for f in iter_files(
+                [p],
+                includes=("**/*.py", "**/*.md", "**/*.toml"),
+                excludes=(cfg.excludes or []),
+            ):
+                discovered.append(f.resolve())
+        elif p.is_file():
+            display_roots.append(p.parent.resolve())
+            discovered.append(p.resolve())
+        else:
+            # nonexistent path: silently ignore (same policy as core)
+            continue
 
-    # Load engines if we need to display engine names
+    # 3) Dedup + deterministic sort
+    dedup = {q.as_posix(): q for q in discovered}
+    files = sorted(dedup.values(), key=lambda q: q.as_posix())
+
+    # 4) Optionally preload engines to show engine names
     if show_engine:
         _load_engines_for(p.suffix for p in files)
 
-    # Output
+    # 5) Output
     if not files:
         print("(no files found)")
         return 0
 
     for p in files:
-        disp = p.as_posix() if show_abs else _display_path(p, roots)
+        disp = p.as_posix() if show_abs else _display_path(p, display_roots)
         if show_engine:
             eng = get_engine_for(p)
             tag = getattr(eng, "__class__", type(eng)).__name__ if eng else "-"
             print(f"{disp}\t[{tag}]")
         else:
             print(disp)
+
     print(f"# total: {len(files)}", file=sys.stderr)
     return 0
 
@@ -115,20 +131,6 @@ def main(argv: list[str] | None = None) -> int:
     # Discovery-only mode (no rendering)
     ap.add_argument(
         "--scan", action="store_true", help="List discovered files (no rendering)."
-    )
-    ap.add_argument(
-        "--include",
-        "-I",
-        action="append",
-        default=None,
-        help='Glob include (relative to each root), e.g. "**/*.py". Repeatable.',
-    )
-    ap.add_argument(
-        "--exclude",
-        "-X",
-        action="append",
-        default=None,
-        help='Fnmatch exclude on relative paths, e.g. "tests/**". Repeatable.',
     )
     ap.add_argument(
         "--abs",
@@ -185,22 +187,20 @@ def main(argv: list[str] | None = None) -> int:
 
     # -------- SCAN MODE --------
     if args.scan:
-        includes = list(args.include) if args.include else list(DEFAULT_INCLUDES)
-        # Merge excludes from config and CLI -X
-        excludes = list(cfg.excludes or [])
-        if args.exclude:
-            excludes.extend(args.exclude)
         roots = _as_paths(args.paths)
         return _run_scan(
             roots,
-            includes=includes,
-            excludes=excludes,
+            cfg=cfg,
             show_abs=args.abs_paths,
             show_engine=args.engines,
         )
 
     # -------- RENDER MODE (default) --------
-    text = build_prompt(args.paths, cfg)
+    try:
+        text = build_prompt(args.paths, cfg)
+    except RuntimeError as e:
+        sys.stderr.write(f"[pytoma:error] {e}\n")
+        return 2
     debug(
         "post-build_prompt: out_len=",
         len(text) if isinstance(text, str) else "<?>",

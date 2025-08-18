@@ -229,9 +229,6 @@ You can override in `config.yml → excludes`.
 | Python (`.py`)   |   ✅  |   ✅  |  ✅  |    ✅    |        ✅       |         ✅        |
 | Markdown (`.md`) |   ✅  |   ✅  |  –  |    –    |        –       |         –        |
 
-Planned: YAML/TOML section policies (toml already started)
-
-
 ---
 
 ## How it works (short)

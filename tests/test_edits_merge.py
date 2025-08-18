@@ -77,8 +77,6 @@ def test_apply_preview_rejects_partial_overlap(tmp_path):
     ]
     with pytest.raises(ValueError):
         apply_edits_preview(edits)
-        
-
 
 
 def test_merge_edits_outermost_and_insertions():
@@ -108,4 +106,3 @@ def test_merge_edits_partial_overlap_raises():
     b = Edit(path=p, span=(15, 25), replacement="")
     with pytest.raises(ValueError):
         merge_edits([a, b])
-

@@ -44,10 +44,10 @@ def test_qual_rule_on_python_module_not_rewritten_as_path(tmp_path):
     out = core.build_prompt([repo], cfg)
 
     # --- Assert: signature + docstring, body omitted ---
-    assert "def f(x: int) -> int:" in out        # signature present
-    assert '"""Tiny doc."""' in out              # docstring present
-    assert "body omitted" in out                 # omission marker present
-    assert "return x * 2" not in out             # body is not present
+    assert "def f(x: int) -> int:" in out  # signature present
+    assert '"""Tiny doc."""' in out  # docstring present
+    assert "body omitted" in out  # omission marker present
+    assert "return x * 2" not in out  # body is not present
 
 
 def test_qual_rule_should_be_order_invariant_even_with_deeper_root_first(tmp_path):
@@ -91,4 +91,3 @@ def test_qual_rule_should_be_order_invariant_even_with_deeper_root_first(tmp_pat
     assert '"""Tiny doc."""' in out
     assert "body omitted" in out
     assert "return x * 2" not in out
-

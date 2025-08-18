@@ -7,6 +7,7 @@ import re
 
 import pytest
 from pytoma.markers import make_omission_line, DEFAULT_OPTIONS
+from pytoma.engines.markdown_naive import MarkdownFallbackEngine
 
 # -- Import the module to test (tolerates two possible organizations) --
 try:
@@ -179,23 +180,43 @@ b
     assert out == expected
 
 
-def test_fallback_regex_still_parses_headings(monkeypatch):
-    """
-    If markdown-it-py is unavailable (monkeypatch to None),
-    the regex fallback still extracts headings.
-    """
-    monkeypatch.setattr(_engines_mod, "MarkdownIt", None, raising=False)
-
-    md = """# H1
-x
-## H2
-y
-"""
-    eng = MarkdownMinEngine()
+def test_markdown_fallback_parses_headings_basic():
+    eng = MarkdownFallbackEngine()
+    md = "# H1\nx\n## H2\ny\n"
     doc = eng.parse(Path("x.md"), md)
     secs = doc.roots[0].children
     assert [s.name for s in secs] == ["H1", "H2"]
-    # Note: we do not test here the behavior in code fences (historical limitation of the fallback).
+
+
+def test_markdown_fallback_ignores_fenced_code_headings():
+    eng = MarkdownFallbackEngine()
+    md = """# H1
+
+```
+
+# not a heading
+
+```
+
+## H2
+"""
+    doc = eng.parse(Path("x.md"), md)
+    secs = doc.roots[0].children
+    assert [s.name for s in secs] == ["H1", "H2"]
+
+
+def test_markdown_fallback_ignores_blockquote_headings():
+    eng = MarkdownFallbackEngine()
+    md = """# Top
+
+> # Quoted heading
+>> ## Nested quoted
+
+## Bottom
+"""
+    doc = eng.parse(Path("x.md"), md)
+    secs = doc.roots[0].children
+    assert [s.name for s in secs] == ["Top", "Bottom"]
 
 
 @pytest.mark.skipif(
