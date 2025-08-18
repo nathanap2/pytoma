@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from pytoma.engines.python_engine import PythonMinEngine
+from pytoma.engines.python_engine import PythonEngine
 from pytoma.policies import Action
 from pytoma.ir import PY_MODULE, PY_CLASS, PY_FUNCTION, PY_METHOD
 from pytoma.edits import merge_edits, _apply_edits_to_text
@@ -28,7 +28,7 @@ def _apply(engine, tmp_path: Path, src: str, decisions):
 
 
 def test_file_no_imports_removes_top_level_and_inserts_marker(tmp_path: Path):
-    engine = PythonMinEngine()
+    engine = PythonEngine()
     src = textwrap.dedent(
         """\
         #!/usr/bin/env python3
@@ -48,7 +48,7 @@ def test_file_no_imports_removes_top_level_and_inserts_marker(tmp_path: Path):
     # Decision: file-level filter on the module
     # We fetch the module node after parse via helper
     # Build a temporary decisions list once we have the doc
-    tmp_engine = PythonMinEngine()
+    tmp_engine = PythonEngine()
     tmp_engine.configure([tmp_path])
     doc0 = tmp_engine.parse(tmp_path / "mod.py", src)
     mod = next(n for n in doc0.nodes if n.kind == PY_MODULE)
@@ -67,7 +67,7 @@ def test_file_no_imports_removes_top_level_and_inserts_marker(tmp_path: Path):
 
 
 def test_hide_class_replaces_block_with_marker(tmp_path: Path):
-    engine = PythonMinEngine()
+    engine = PythonEngine()
     src = textwrap.dedent(
         """\
         @decorator
@@ -94,7 +94,7 @@ def test_hide_class_replaces_block_with_marker(tmp_path: Path):
 
 
 def test_sigdoc_function_keeps_header_and_doc_omits_body(tmp_path: Path):
-    engine = PythonMinEngine()
+    engine = PythonEngine()
     src = textwrap.dedent(
         """\
         def foo(a, b):
@@ -119,7 +119,7 @@ def test_sigdoc_function_keeps_header_and_doc_omits_body(tmp_path: Path):
 
 
 def test_levels_k1_omits_deeper_indentation(tmp_path: Path):
-    engine = PythonMinEngine()
+    engine = PythonEngine()
     src = textwrap.dedent(
         """\
         def h():

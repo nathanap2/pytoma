@@ -76,7 +76,7 @@ def _run_scan(
             display_roots.append(p)
             for f in iter_files(
                 [p],
-                includes=("**/*.py", "**/*.md", "**/*.toml"),
+                includes=("**/*.py", "**/*.md", "**/*.toml", "**/*.xml"),
                 excludes=(cfg.excludes or []),
             ):
                 discovered.append(f.resolve())

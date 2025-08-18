@@ -37,7 +37,7 @@ def _parse_headings_with_markdown_it(text: str) -> List[Tuple[int, int, str]]:
     return headings
 
 
-class MarkdownMinEngine:
+class MarkdownEngine:
     filetypes = {"md"}
 
     def configure(self, roots: List[Path]) -> None:
@@ -142,4 +142,4 @@ class MarkdownMinEngine:
 
 
 def create_engine():
-    return MarkdownMinEngine()
+    return MarkdownEngine()

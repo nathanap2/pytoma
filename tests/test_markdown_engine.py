@@ -9,13 +9,10 @@ import pytest
 from pytoma.markers import make_omission_line, DEFAULT_OPTIONS
 from pytoma.engines.markdown_naive import MarkdownFallbackEngine
 
-# -- Import the module to test (tolerates two possible organizations) --
-try:
-    _engines_mod = importlib.import_module("pytoma.engines.markdown_engine")
-except ImportError:
-    _engines_mod = importlib.import_module("engines.markdown_min")
+_engines_mod = importlib.import_module("pytoma.engines.markdown_engine")
 
-MarkdownMinEngine = getattr(_engines_mod, "MarkdownMinEngine")
+
+MarkdownEngine = getattr(_engines_mod, "MarkdownEngine")
 HAS_MDIT = getattr(_engines_mod, "MarkdownIt", None) is not None
 
 # Small "duck-typed" Action: only the .kind property is read by the engine.
@@ -57,7 +54,7 @@ print("hello")
 ## Autre section
 du texte
 """
-    eng = MarkdownMinEngine()
+    eng = MarkdownEngine()
     doc = eng.parse(Path("dummy.md"), md)
 
     # Retrieve sections (direct children of the root)
@@ -91,7 +88,7 @@ print("hello")
 ## Autre section
 du texte
 """
-    eng = MarkdownMinEngine()
+    eng = MarkdownEngine()
     doc = eng.parse(Path("dummy.md"), md)
 
     target = [n for n in doc.roots[0].children if n.name == "Une section"][0]
@@ -121,7 +118,7 @@ Sous-titre
 
 Corps
 """
-    eng = MarkdownMinEngine()
+    eng = MarkdownEngine()
     doc = eng.parse(Path("x.md"), md)
 
     secs = doc.roots[0].children
@@ -134,7 +131,7 @@ def test_atx_closed_heading_text_is_clean():
     md = """###   Title with hashes   ###   
 Body
 """
-    eng = MarkdownMinEngine()
+    eng = MarkdownEngine()
     doc = eng.parse(Path("x.md"), md)
     secs = doc.roots[0].children
     assert len(secs) == 1
@@ -146,7 +143,7 @@ Body
 
 def test_slugify_removes_accents_and_punctuation():
     md = "## Élévation & coût\nTexte"
-    eng = MarkdownMinEngine()
+    eng = MarkdownEngine()
     doc = eng.parse(Path("x.md"), md)
     slug = doc.roots[0].children[0].meta.get("slug")
     assert slug == "elevation-cout"
@@ -162,7 +159,7 @@ a
 ## S2
 b
 """
-    eng = MarkdownMinEngine()
+    eng = MarkdownEngine()
     doc = eng.parse(Path("x.md"), md)
     root = doc.roots[0]
     edits = eng.render(doc, decisions=[(root, _Action("hide"))])
@@ -238,7 +235,7 @@ pip install -e .
 ## Usage
 (du texte)
 """
-    eng = MarkdownMinEngine()
+    eng = MarkdownEngine()
     doc = eng.parse(Path("README.md"), md)
 
     # Target the "Installation" section

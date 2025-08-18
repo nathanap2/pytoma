@@ -31,7 +31,7 @@ def _has_substantive_text(block: str) -> bool:
     return False
 
 
-class TomlMinEngine:
+class TomlEngine:
 
     filetypes = {"toml"}
 
@@ -143,4 +143,4 @@ class TomlMinEngine:
 
 
 def create_engine():
-    return TomlMinEngine()
+    return TomlEngine()

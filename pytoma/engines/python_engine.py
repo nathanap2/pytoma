@@ -389,7 +389,7 @@ def _mode_of_action(a: Action) -> Optional[str]:
     return None
 
 
-class PythonMinEngine:
+class PythonEngine:
     """
     Function/method granularity, structured as a tree (module → classes → defs).
     """
@@ -639,4 +639,4 @@ class PythonMinEngine:
 
 
 def create_engine():
-    return PythonMinEngine()
+    return PythonEngine()

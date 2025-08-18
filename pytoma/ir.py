@@ -18,6 +18,10 @@ MD_HEADING = "md:heading"
 TOML_DOC = "toml:doc"
 TOML_TABLE = "toml:table"
 
+# XML
+XML_DOC = "xml:doc"
+XML_ELEMENT = "xml:element"
+
 # WIP ... YAML_KEY = "yaml:key", ...
 
 

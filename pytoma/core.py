@@ -30,6 +30,7 @@ _ENGINE_FACTORY_BY_EXT: Dict[str, str] = {
     "py": "pytoma.engines.python_engine:create_engine",
     "md": "pytoma.engines.markdown_engine:create_engine",
     "toml": "pytoma.engines.toml_engine:create_engine",
+    "xml": "pytoma.engines.xml_engine:create_engine",
 }
 _LOADED_EXTS: set[str] = set()  # extensions we attempted to load
 _ENGINE_LOAD_ERRORS: Dict[str, str] = {}  # ext -> concise failure reason
@@ -154,9 +155,21 @@ def _decide_for_node(
     # 1) Qualname rules (tested against relative/absolute variants)
     if node.qual:
         qvars = _qual_candidates(node, roots)
+
+        # --- helper: glob-lite (only * and ? are wildcards; [] are literals) ---
+        def _glob_lite_match(pat: str, s: str) -> bool:
+            # Fast-path: exact match when no wildcards
+            if "*" not in pat and "?" not in pat:
+                return s == pat
+            import re as _re
+
+            rx = _re.escape(pat).replace(r"\*", ".*").replace(r"\?", ".")
+            return _re.fullmatch(rx, s) is not None
+
         for r in cfg.rules or []:
-            if ":" in r.match and any(fnmatchcase(q, r.match) for q in qvars):
-                return to_action(r.mode)
+            if ":" in r.match:
+                if any(_glob_lite_match(r.match, q) for q in qvars):
+                    return to_action(r.mode)
 
     # 2) Path rules (on ABS + REL + basename/REL)
     for r in cfg.rules or []:
@@ -180,6 +193,7 @@ def _fence_lang_for(path: pathlib.Path) -> str:
         "yaml": "yaml",
         "yml": "yaml",
         "toml": "toml",
+        "xml": "xml",
     }.get(ext, "")
 
 
@@ -209,10 +223,9 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
     for p in norm_inputs:
         if p.is_dir():
             roots.append(p)
-            # expand directories only: same extensions as the CLI
             for f in iter_files(
                 [p],
-                includes=("**/*.py", "**/*.md", "**/*.toml"),
+                includes=("**/*.py", "**/*.md", "**/*.toml", "**/*.xml"),
                 excludes=(cfg.excludes or []),
             ):
                 discovered.append(f.resolve())
