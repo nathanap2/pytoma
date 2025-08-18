@@ -29,8 +29,42 @@ Note from the author : I originally vibe-coded a basic tool for myself because C
 
 ## Installation
 
+**Prerequisites:** Python ≥ 3.9
+
 ```bash
 pip install pytoma
+```
+
+If you can't directly call pip : 
+
+```bash
+python -m pip install pytoma
+```
+
+Of course, if your pip alias is pip3, replace pip by pip3 in the command (and if your python alias is python3, replace python by python3 ...)
+
+You can verify your installation with
+
+```bash
+pytoma --version
+pytoma --help
+```
+
+During installation, if `pip` prints a **warning** like:
+
+```
+The script 'pytoma' is installed in '…' which is not on PATH
+```
+
+Then you must permanently add **that folder** to your `PATH` (in your .bashrc or .zshrc), and then reopen the terminal.
+
+
+As a fallback, you may also install from source :
+
+```bash
+git clone https://github.com/nathanap2/pytoma.git
+cd pytoma
+python -m pip install .
 ```
 
 ---

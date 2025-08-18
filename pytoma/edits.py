@@ -6,12 +6,12 @@ from typing import Dict, Iterable, List
 from .ir import Edit
 
 
-
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
 from .ir import Edit
+
 
 def merge_edits(edits: Iterable[Edit]) -> List[Edit]:
     """
@@ -42,7 +42,9 @@ def merge_edits(edits: Iterable[Edit]) -> List[Edit]:
             elif t == s:
                 inserts.append(e)
             else:
-                raise ValueError(f"Invalid span (end < start) on {path.as_posix()}: {e.span}")
+                raise ValueError(
+                    f"Invalid span (end < start) on {path.as_posix()}: {e.span}"
+                )
 
         # 2) Merge deletions/updates: outermost wins
         ordered_del = sorted(deletes, key=lambda e: (e.span[0], -e.span[1]))
@@ -70,8 +72,14 @@ def merge_edits(edits: Iterable[Edit]) -> List[Edit]:
                 if s <= p <= t:
                     p = t
             if p != ins.span[0]:
-                norm_inserts.append(Edit(path=ins.path, span=(p, p),
-                                         replacement=ins.replacement, comment=ins.comment))
+                norm_inserts.append(
+                    Edit(
+                        path=ins.path,
+                        span=(p, p),
+                        replacement=ins.replacement,
+                        comment=ins.comment,
+                    )
+                )
             else:
                 norm_inserts.append(ins)
 
@@ -82,7 +90,6 @@ def merge_edits(edits: Iterable[Edit]) -> List[Edit]:
     # 5) Deterministic global order (by file, then by offset)
     merged_all.sort(key=lambda e: (Path(e.path).as_posix(), e.span[0], e.span[1]))
     return merged_all
-
 
 
 def _apply_edits_to_text(text: str, edits: List[Edit]) -> str:

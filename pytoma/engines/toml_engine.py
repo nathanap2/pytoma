@@ -1,4 +1,3 @@
-
 from pathlib import Path, PurePosixPath
 from typing import List, Tuple
 import re
@@ -6,7 +5,7 @@ import re
 from ..ir import Node, Document, assign_ids, flatten, Edit, TOML_DOC, TOML_TABLE
 from ..markers import make_omission_line, DEFAULT_OPTIONS
 
-# Tables et arrays-of-tables (en-têtes seulement).
+
 _TBL_RE = re.compile(r"(?m)^[ \t]*\[(?P<name>[^\[\]\n]+)\][ \t]*(?:#.*)?$")
 _TBLARR_RE = re.compile(r"(?m)^[ \t]*\[\[(?P<name>[^\[\]\n]+)\]\][ \t]*(?:#.*)?$")
 _COMMENT_RE = re.compile(r"^[ \t]*#")
@@ -23,7 +22,6 @@ def _line_starts(text: str) -> List[int]:
 
 
 def _has_substantive_text(block: str) -> bool:
-    """Vrai si 'block' contient autre chose que du vide ou des commentaires."""
     for ln in block.splitlines():
         if _WHITESPACE.match(ln):
             continue
@@ -34,14 +32,10 @@ def _has_substantive_text(block: str) -> bool:
 
 
 class TomlMinEngine:
-    """
-    Granularité: document complet + sections par [table] / [[array-of-table]].
-    Actions supportées: 'full' et 'hide'.
-    """
 
     filetypes = {"toml"}
 
-    def configure(self, roots: List[Path]) -> None:  # signature homogène
+    def configure(self, roots: List[Path]) -> None:
         return
 
     def parse(self, path: Path, text: str) -> Document:
@@ -59,7 +53,6 @@ class TomlMinEngine:
             children=[],
         )
 
-        # Collecte des en-têtes (tables + arrays)
         hits: List[Tuple[int, str, bool]] = []  # (char_start, name, is_array)
         for m in _TBL_RE.finditer(text):
             hits.append((m.start(), m.group("name").strip(), False))
@@ -69,7 +62,6 @@ class TomlMinEngine:
 
         nodes: List[Node] = []
 
-        # Pseudo-table (root) si contenu avant la 1re table
         first_start = hits[0][0] if hits else len(text)
         prefix = text[:first_start]
         if _has_substantive_text(prefix):
@@ -85,7 +77,6 @@ class TomlMinEngine:
                 )
             )
 
-        # Sections: chaque table jusqu'à la suivante
         n = len(hits)
         for i, (start_char, name, is_array) in enumerate(hits):
             end_char = hits[i + 1][0] if i + 1 < n else len(text)
@@ -116,7 +107,6 @@ class TomlMinEngine:
             if action.kind == "full":
                 continue
             if action.kind == "hide":
-                # Omission du document entier
                 if node.kind == TOML_DOC:
                     marker = make_omission_line(
                         lang="toml",
@@ -151,7 +141,6 @@ class TomlMinEngine:
                     )
         return edits
 
+
 def create_engine():
     return TomlMinEngine()
-
-

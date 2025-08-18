@@ -3,13 +3,10 @@ from pathlib import Path, PurePosixPath
 from typing import Iterable, Iterator, Union
 import os
 import sys
-
-
-def _dbg(*a):
-    if os.environ.get("PYTOMA_DEBUG"):
-        sys.stderr.write("[pytoma:debug:scan] " + " ".join(map(str, a)) + "\n")
+from .log import debug
 
 RootT = Union[str, os.PathLike, Path]
+
 
 def iter_files(
     roots: Iterable[RootT],
@@ -39,10 +36,20 @@ def iter_files(
     for r in roots:  # type: ignore[assignment]
         norm_roots.append(r if isinstance(r, Path) else Path(r))
 
-    _dbg("iter.start", "roots=", [str(r) for r in norm_roots],
-         "includes=", list(includes), "excludes=", list(excludes))
+    debug(
+        (
+            "iter.start",
+            "roots=",
+            [str(r) for r in norm_roots],
+            "includes=",
+            list(includes),
+            "excludes=",
+            list(excludes),
+        ),
+        tag="scan",
+    )
 
-    seen: set[tuple[str, str]] = set()    # (base_resolved, rel_posix)
+    seen: set[tuple[str, str]] = set()  # (base_resolved, rel_posix)
     out: list[Path] = []
 
     # -- 2) Walk roots and patterns
@@ -71,12 +78,22 @@ def iter_files(
                 out.append(p)
                 matched_this_pattern += 1
 
-            _dbg("iter.glob", "base=", str(base), "inc=", inc, "matched=", matched_this_pattern)
+            debug(
+                (
+                    "iter.glob",
+                    "base=",
+                    str(base),
+                    "inc=",
+                    inc,
+                    "matched=",
+                    matched_this_pattern,
+                ),
+                tag="scan",
+            )
 
     # -- 6) Deterministic sort then yield
     out.sort(key=lambda q: (str(q.parent.resolve()), q.name))
 
-    _dbg("iter.done", "total=", len(out))
+    debug(("iter.done", "total=", len(out)), tag="scan")
     for p in out:
         yield p
-

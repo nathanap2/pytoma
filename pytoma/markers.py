@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Optional
 
 Style = Literal["comment", "scissors", "ellipsis", "box"]
 
@@ -72,7 +72,7 @@ def make_omission_line(
     *,
     indent: str = "",
     opts: MarkerOptions = DEFAULT_OPTIONS,
-    label: str | None = None,
+    label: Optional[str] = None,
 ) -> str:
     """
     Build a single-line omission marker (or a light box for style 'box').

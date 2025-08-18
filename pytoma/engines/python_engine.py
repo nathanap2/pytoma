@@ -69,16 +69,13 @@ def _module_name(path: Path) -> str:
         parts = parts[:-1]
     return ".".join(parts)
 
-def _line_starts(text: str) -> List[int]:
-    starts = [0]
-    acc = 0
-    for line in text.splitlines(keepends=True):
-        acc += len(line)
-        starts.append(acc)
-    return starts
+
+from ..utils import line_starts
 
 
-def _line_span_to_char_span(ls: List[int], start_line: int, end_line: int) -> Tuple[int, int]:
+def _line_span_to_char_span(
+    ls: List[int], start_line: int, end_line: int
+) -> Tuple[int, int]:
     s = ls[start_line - 1]
     t = ls[end_line]
     return (s, t)
@@ -250,7 +247,7 @@ def _gather_top_level_import_edits_and_names(
         r = positions[stmt]
         # Remove the whole line (from start-of-line to start-of-next-line).
         s = ls[r.start.line - 1]  # beginning of the line
-        t = ls[r.end.line]        # beginning of the next line (or end-of-text)
+        t = ls[r.end.line]  # beginning of the next line (or end-of-text)
         delete_spans.append((s, t))
 
     for stmt in mod.body:
@@ -283,7 +280,9 @@ def _gather_top_level_import_edits_and_names(
                         dot_count = len(getattr(rel, "dots", []) or [])
                     except Exception:
                         dot_count = 0
-                mod_txt = _code_for(mod, small.module) if small.module is not None else ""
+                mod_txt = (
+                    _code_for(mod, small.module) if small.module is not None else ""
+                )
                 prefix = "." * dot_count
                 mod_full = f"{prefix}{mod_txt}" if (prefix or mod_txt) else ""
 
@@ -315,12 +314,19 @@ def _drop_top_level_imports_with_marker_cst(
     positions: metadata.PositionProvider,
     ls: List[int],
 ) -> List[Edit]:
-    delete_spans, removed_names = _gather_top_level_import_edits_and_names(mod, positions, ls)
-    edits: List[Edit] = [Edit(path=path, span=span, replacement="") for span in delete_spans]
+    delete_spans, removed_names = _gather_top_level_import_edits_and_names(
+        mod, positions, ls
+    )
+    edits: List[Edit] = [
+        Edit(path=path, span=span, replacement="") for span in delete_spans
+    ]
     if not removed_names:
         return edits
     insert_pos = _compute_marker_insert_pos_cst(source, mod, positions, ls)
-    marker = _format_imports_marker(removed_names, mode="list", max_items=4, max_chars=120) + "\n"
+    marker = (
+        _format_imports_marker(removed_names, mode="list", max_items=4, max_chars=120)
+        + "\n"
+    )
     edits.append(Edit(path=path, span=(insert_pos, insert_pos), replacement=marker))
     return edits
 
@@ -349,7 +355,9 @@ class _ClassCollectorCST(cst.CSTVisitor):
         start = self.ls[start_line - 1]
         end = self.ls[end_line - 1] + end_col
 
-        qual_local = ".".join(self.stack + [node.name.value]) if self.stack else node.name.value
+        qual_local = (
+            ".".join(self.stack + [node.name.value]) if self.stack else node.name.value
+        )
         parent_local = ".".join(self.stack) if self.stack else None
         decos = [_decorator_to_str_py(d) for d in (node.decorators or [])]
 
@@ -373,7 +381,9 @@ class _ClassCollectorCST(cst.CSTVisitor):
 # ---------------------------
 
 
-def _collect_funcs(text: str, path: Path) -> Tuple[List[str], List[FuncInfo], cst.Module, metadata.PositionProvider]:
+def _collect_funcs(
+    text: str, path: Path
+) -> Tuple[List[str], List[FuncInfo], cst.Module, metadata.PositionProvider]:
     src = text.splitlines(keepends=True)
     mod = cst.parse_module(text)
     wrapper = metadata.MetadataWrapper(mod, unsafe_skip_copy=True)
@@ -422,7 +432,7 @@ class PythonMinEngine:
     def parse(self, path: Path, text: str) -> Document:
         posix = PurePosixPath(path.as_posix())
         src, funcs, cst_mod, posmap = _collect_funcs(text, path)
-        ls = _line_starts(text)
+        ls = line_starts(text)
         module_name = _module_name(path)
 
         # Module root
@@ -475,7 +485,9 @@ class PythonMinEngine:
             # Span (includes decorators)
             s = ls[fi.deco_start_line - 1]
             e = ls[fi.end[0] - 1] + fi.end[1]
-            local = fi.qualname.split(":", 1)[1]  # "func" or "Class.meth" or "outer.inner"
+            local = fi.qualname.split(":", 1)[
+                1
+            ]  # "func" or "Class.meth" or "outer.inner"
             parts = local.split(".")
             name = parts[-1]
             parent_local = ".".join(parts[:-1]) if len(parts) > 1 else None
@@ -547,14 +559,14 @@ class PythonMinEngine:
         # Defensive fallbacks for compatibility (should rarely trigger)
         if analysis:
             src: List[str] = analysis.get("src_lines") or doc.text.splitlines(keepends=True)  # type: ignore[assignment]
-            ls: List[int] = analysis.get("line_starts") or _line_starts(doc.text)  # type: ignore[assignment]
+            ls: List[int] = analysis.get("line_starts") or line_starts(doc.text)  # type: ignore[assignment]
             by_qual: Dict[str, FuncInfo] = analysis.get("funcs_by_qual") or {}  # type: ignore[assignment]
             cst_mod: Optional[cst.Module] = analysis.get("cst_module")  # type: ignore[assignment]
             posmap: Optional[metadata.PositionProvider] = analysis.get("posmap")  # type: ignore[assignment]
         else:
             # Old behavior (fallback): minimal re-parse
             src, funcs, cst_mod, posmap = _collect_funcs(doc.text, Path(doc.path))
-            ls = _line_starts(doc.text)
+            ls = line_starts(doc.text)
             by_qual = {fi.qualname: fi for fi in funcs}
 
         candidates: List[Edit] = []
@@ -587,7 +599,9 @@ class PythonMinEngine:
                     opts=DEFAULT_OPTIONS,
                     label="module omitted",
                 )
-                candidates.append(Edit(path=doc.path, span=(0, len(doc.text)), replacement=marker))
+                candidates.append(
+                    Edit(path=doc.path, span=(0, len(doc.text)), replacement=marker)
+                )
                 continue
 
             if node.kind == PY_CLASS:
@@ -598,16 +612,22 @@ class PythonMinEngine:
                     omitted_text = doc.text[s:t]
                     start_line = before.count("\n") + 1
                     end_line = start_line + omitted_text.count("\n")
-                    indent = ""  # could be refined by reusing the indent of the first line
+                    indent = (
+                        ""  # could be refined by reusing the indent of the first line
+                    )
                     marker = make_omission_line(
                         "py",
                         start_line,
                         end_line,
                         indent=indent,
                         opts=DEFAULT_OPTIONS,
-                        label=f"class {node.name} omitted" if node.name else "class omitted",
+                        label=f"class {node.name} omitted"
+                        if node.name
+                        else "class omitted",
                     )
-                    candidates.append(Edit(path=doc.path, span=node.span, replacement=marker))
+                    candidates.append(
+                        Edit(path=doc.path, span=node.span, replacement=marker)
+                    )
                 continue
 
             if node.kind in {PY_FUNCTION, PY_METHOD}:
@@ -628,7 +648,9 @@ class PythonMinEngine:
                             opts=DEFAULT_OPTIONS,
                             label="definition omitted",
                         )
-                        candidates.append(Edit(path=doc.path, span=node.span, replacement=marker))
+                        candidates.append(
+                            Edit(path=doc.path, span=node.span, replacement=marker)
+                        )
                     continue
 
                 rep = _replacement_for_mode(mode, fi, src)
@@ -640,7 +662,6 @@ class PythonMinEngine:
 
         # No deduplication/pruning here: delegate to fs.merge_edits
         return candidates
-
 
 
 def create_engine():

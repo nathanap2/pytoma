@@ -17,13 +17,10 @@ from .pre_resolution import pre_resolve_path_rules
 
 from .config import Config, Rule
 
-
-
-
 import os, sys
-def _debug(*parts):
-    if os.environ.get("PYTOMA_DEBUG"):
-        sys.stderr.write("[pytoma:debug:core] " + " ".join(map(str, parts)) + "\n")
+
+from .log import debug
+
 
 # --- Display options ---
 # "absolute": shows the absolute path
@@ -36,17 +33,19 @@ _ENGINES = {}
 # --- Lazy engine loader (no side effects) ------------------------------------
 # Mapping extension -> "module:factory"; the factory must return an Engine instance.
 _ENGINE_FACTORY_BY_EXT: Dict[str, str] = {
-    "py":   "pytoma.engines.python_engine:create_engine",   # choose ONE implementation
-    "md":   "pytoma.engines.markdown_engine:create_engine",
+    "py": "pytoma.engines.python_engine:create_engine",  # choose ONE implementation
+    "md": "pytoma.engines.markdown_engine:create_engine",
     "toml": "pytoma.engines.toml_engine:create_engine",
 }
 _LOADED_EXTS: set[str] = set()  # extensions we attempted to load
+
 
 def _register_engine_instance(engine) -> None:
     # Registers the instance for all of its declared extensions
     for ext in getattr(engine, "filetypes", []):
         key = ext.lower().lstrip(".")
         _ENGINES[key] = engine
+
 
 def _ensure_engine_loaded_for(ext: str) -> None:
     """
@@ -71,13 +70,9 @@ def _ensure_engine_loaded_for(ext: str) -> None:
         return
 
 
-
-
-
-
-
 def get_engine_for(path: Path):
     return _ENGINES.get(path.suffix.lower().lstrip("."))
+
 
 def _display_path(path: pathlib.Path, roots: list[pathlib.Path]) -> str:
     """
@@ -178,7 +173,10 @@ def _fence_lang_for(path: pathlib.Path) -> str:
 
 
 def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
-    _debug("start", "n_files=", len(paths), "default=", getattr(cfg, "default", None))
+    debug(
+        ("start", "n_files=", len(paths), "default=", getattr(cfg, "default", None)),
+        tag="core",
+    )
 
     out: List[str] = []
 
@@ -198,8 +196,11 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
         if p.is_dir():
             roots.append(p)
             # expand directories only: same extensions as the CLI
-            for f in iter_files([p], includes=("**/*.py", "**/*.md", "**/*.toml"),
-                                excludes=(cfg.excludes or [])):
+            for f in iter_files(
+                [p],
+                includes=("**/*.py", "**/*.md", "**/*.toml"),
+                excludes=(cfg.excludes or []),
+            ):
                 discovered.append(f.resolve())
         elif p.is_file():
             roots.append(p.parent)
@@ -224,9 +225,12 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
     # 4) parse -> decide -> render
     for path in discovered:
         engine = get_engine_for(path)
-        _debug("route", str(path), "engine=", getattr(engine, "__name__", repr(engine)))
+        debug(
+            ("route", str(path), "engine=", getattr(engine, "__name__", repr(engine))),
+            tag="core",
+        )
         if not engine:
-            _debug("skip-noengine", str(path))
+            debug(("skip-noengine", str(path)), tag="core")
             continue
 
         # Optional configuration hook for the engine (e.g., project roots)
@@ -234,8 +238,10 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
         if callable(configure):
             try:
                 # pass resolved (and deduplicated) roots to the engine
-                cfg_roots = sorted({r.resolve().as_posix(): r.resolve() for r in roots}.values(),
-                                   key=lambda r: r.as_posix())
+                cfg_roots = sorted(
+                    {r.resolve().as_posix(): r.resolve() for r in roots}.values(),
+                    key=lambda r: r.as_posix(),
+                )
                 configure(cfg_roots)
             except Exception:
                 pass
@@ -273,7 +279,6 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
         display = _display_path(path, roots)
         out.append(f"\n### {display}\n\n{fence}\n{shown}\n```\n")
 
-    _debug("done")
+    debug(("done",), tag="core")
 
     return "# (no files found)\n" if not out else "".join(out)
-

@@ -19,28 +19,7 @@ except Exception:  # pragma: no cover
 _HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$", re.MULTILINE)
 
 
-def _line_starts(text: str) -> List[int]:
-    """
-    Return the character offsets of the start of each line, plus a final sentinel.
-    Enables O(1) conversion from line_index -> char_offset.
-    """
-    starts = [0]
-    acc = 0
-    for line in text.splitlines(keepends=True):
-        acc += len(line)
-        starts.append(acc)
-    return starts
-
-
-def _slugify(title: str) -> str:
-    """
-    Deterministic, accent-insensitive slug.
-    """
-    s = unicodedata.normalize("NFKD", title)
-    s = "".join(ch for ch in s if not unicodedata.combining(ch))
-    s = s.lower()
-    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
-    return s or "section"
+from ..utils import line_starts, slugify
 
 
 def _parse_headings_with_markdown_it(text: str) -> List[Tuple[int, int, str]]:
@@ -86,7 +65,7 @@ def _parse_headings_with_regex(text: str) -> List[Tuple[int, int, str]]:
     Minimal fallback (old behavior) based on regex.
     Can mistake '#' inside code for headings.
     """
-    ls = _line_starts(text)
+    ls = line_starts(text)
     out: List[Tuple[int, int, str]] = []
     for m in _HEADING_RE.finditer(text):
         hashes = m.group(1)
@@ -116,7 +95,7 @@ class MarkdownMinEngine:
         Headings detected via markdown-it-py (robust against code fences).
         """
         posix = PurePosixPath(path.as_posix())
-        ls = _line_starts(text)
+        ls = line_starts(text)
         n_lines = len(ls) - 1  # number of lines
 
         # Document root
@@ -157,7 +136,7 @@ class MarkdownMinEngine:
             start_char = ls[start_line] if 0 <= start_line < len(ls) else 0
             end_char = ls[end_line] if 0 <= end_line < len(ls) else len(text)
 
-            slug = _slugify(title)
+            slug = slugify(title)
             qual = f"{posix}:{slug}"
             node = Node(
                 kind=MD_HEADING,
@@ -226,6 +205,7 @@ class MarkdownMinEngine:
                 )
 
         return candidates
+
 
 def create_engine():
     return MarkdownMinEngine()
