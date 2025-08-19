@@ -6,20 +6,17 @@ import sys
 from pathlib import Path
 from typing import Iterable, List
 
-
-from .log import debug
 from .config import Config
-from .core import build_prompt, _display_path, get_engine_for, _ensure_engine_loaded_for
+from .core import build_prompt, get_engine_for, _ensure_engine_loaded_for, _display_path
+from .log import debug
 from .scan import iter_files
+
+from .prompts import render_prompt as _render_prompt
 
 
 def _get_version_string() -> str:
-    """
-    Resolve the installed package version (from importlib.metadata).
-    Falls back to a sentinel if unavailable.
-    """
     try:
-        from importlib.metadata import version as _v  # Python >= 3.8
+        from importlib.metadata import version as _v
     except Exception:  # pragma: no cover
         return "pytoma 0+unknown"
     try:
@@ -29,7 +26,6 @@ def _get_version_string() -> str:
 
 
 def _as_paths(paths: Iterable[Path | str]) -> List[Path]:
-    """Normalize a sequence of path-like values to Path objects."""
     out: List[Path] = []
     for p in paths:
         out.append(p if isinstance(p, Path) else Path(p))
@@ -37,10 +33,6 @@ def _as_paths(paths: Iterable[Path | str]) -> List[Path]:
 
 
 def _load_engines_for(exts: Iterable[str]) -> None:
-    """
-    Ensure engines are loaded for the given set of file extensions.
-    Useful when --scan requests to display which engine would be used.
-    """
     seen: set[str] = set()
     for e in exts:
         if not e:
@@ -58,17 +50,7 @@ def _run_scan(
     show_abs: bool,
     show_engine: bool,
 ) -> int:
-    """
-    Discovery-only, but mirrors core.build_prompt:
-      - if an input is a directory: iter_files(dir, includes=py/md/toml, excludes=cfg.excludes)
-      - if an input is a file: include it directly and use its parent as a root
-      - deduplicate + deterministic sort
-      - same display path logic relative to the deepest matching root
-    """
-    # 1) Normalise inputs
     inputs = [p.resolve() for p in roots]
-
-    # 2) Discover files exactly like core
     display_roots: List[Path] = []
     discovered: List[Path] = []
     for p in inputs:
@@ -84,18 +66,14 @@ def _run_scan(
             display_roots.append(p.parent.resolve())
             discovered.append(p.resolve())
         else:
-            # nonexistent path: silently ignore (same policy as core)
             continue
 
-    # 3) Dedup + deterministic sort
     dedup = {q.as_posix(): q for q in discovered}
     files = sorted(dedup.values(), key=lambda q: q.as_posix())
 
-    # 4) Optionally preload engines to show engine names
     if show_engine:
         _load_engines_for(p.suffix for p in files)
 
-    # 5) Output
     if not files:
         print("(no files found)")
         return 0
@@ -113,13 +91,41 @@ def _run_scan(
     return 0
 
 
+def _parse_kv_pairs(pairs: list[str]) -> dict:
+    out = {}
+    for item in pairs or []:
+        if "=" not in item:
+            raise SystemExit(f"--prompt-arg expects K=V, got: {item!r}")
+        k, v = item.split("=", 1)
+        out[k.strip()] = v.strip()
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Pytoma — render a repo into one LLM-ready text file"
     )
+
+    ap.add_argument(
+        "--prompt",
+        type=str,
+        default=None,
+        help=(
+            "Wrap output inside a built-in code-working prompt "
+            "(e.g., 'look_at_possible_factorisations', 'add_docstrings'). "
+            "See --list-prompts."
+        ),
+    )
+    ap.add_argument(
+        "--prompt-arg",
+        action="append",
+        default=[],
+        metavar="K=V",
+        help="Optional variables for the prompt template (repeatable), e.g. --prompt-arg docstyle=NumPy",
+    )
+
     ap.add_argument("-V", "--version", action="version", version=_get_version_string())
 
-    # Verbosity / debugging (enables internal debug logs)
     ap.add_argument(
         "-v",
         "--verbose",
@@ -128,7 +134,6 @@ def main(argv: list[str] | None = None) -> int:
         help="Increase verbosity (sets PYTOMA_DEBUG). Repeat for more logs.",
     )
 
-    # Discovery-only mode (no rendering)
     ap.add_argument(
         "--scan", action="store_true", help="List discovered files (no rendering)."
     )
@@ -144,35 +149,53 @@ def main(argv: list[str] | None = None) -> int:
         help="With --scan, also show which engine would handle each file.",
     )
 
-    # Rendering (default behavior)
+    # --config now accepts path OR built-in name
     ap.add_argument(
-        "paths",
-        nargs="+",
-        type=Path,
-        help="Files or directories (e.g. '.' or 'src/')",
-    )
-    ap.add_argument(
-        "--config", type=Path, default=None, help="YAML with default/rules/excludes"
-    )
-    ap.add_argument(
-        "--default", type=str, default="full", help="Default mode if no rule matches"
-    )
-    ap.add_argument(
-        "--out",
-        type=Path,
+        "--config",
+        type=str,
         default=None,
-        help="Write output to file instead of stdout",
+        help=(
+            "YAML path or built-in name (e.g. 'skeleton'). "
+            "Explicit forms: 'builtin:<name>', 'preset:<name>', '@<name>', ':<name>'."
+        ),
+    )
+    # Help users discover what exists
+    ap.add_argument(
+        "--list-configs",
+        action="store_true",
+        help="List built-in configuration names and exit.",
+    )
+
+    ap.add_argument(
+        "paths", nargs="+", type=Path, help="Files or directories (e.g. '.' or 'src/')"
+    )
+    ap.add_argument(
+        "--default",
+        type=str,
+        default="full",
+        help="Default mode if no rule matches (overrides built-in default when set).",
+    )
+    ap.add_argument(
+        "--out", type=Path, default=None, help="Write output to file instead of stdout"
     )
 
     args = ap.parse_args(argv)
 
-    # Verbose → turn on internal debugs across modules
     if args.verbose and not os.environ.get("PYTOMA_DEBUG"):
         os.environ["PYTOMA_DEBUG"] = "1"
 
+    if args.list_configs:
+        names = Config.list_builtins()
+        if names:
+            for n in names:
+                print(n)
+        else:
+            print("(no built-in configs found)")
+        return 0
+
     debug("python=", sys.executable, "cli_file=", __file__, tag="cli")
     try:
-        import pytoma as _pkg  # resolves installed package location
+        import pytoma as _pkg
 
         debug("pkg_file=", getattr(_pkg, "__file__", None), tag="cli")
     except Exception as e:
@@ -181,21 +204,17 @@ def main(argv: list[str] | None = None) -> int:
     debug("cwd=", str(Path.cwd()), tag="cli")
     debug("argv=", list(sys.argv), tag="cli")
     debug("args.paths=", [str(p) for p in args.paths], tag="cli")
+    if args.config:
+        debug("config_arg=", args.config, tag="cli")
 
-    # Load configuration (for excludes + default)
-    cfg = Config.load(args.config, args.default)
+    cfg = Config.load_any(args.config, args.default)
 
-    # -------- SCAN MODE --------
     if args.scan:
         roots = _as_paths(args.paths)
         return _run_scan(
-            roots,
-            cfg=cfg,
-            show_abs=args.abs_paths,
-            show_engine=args.engines,
+            roots, cfg=cfg, show_abs=args.abs_paths, show_engine=args.engines
         )
 
-    # -------- RENDER MODE (default) --------
     try:
         text = build_prompt(args.paths, cfg)
     except RuntimeError as e:
@@ -206,6 +225,16 @@ def main(argv: list[str] | None = None) -> int:
         len(text) if isinstance(text, str) else "<?>",
         tag="cli",
     )
+
+    if args.prompt:
+        try:
+            kv = _parse_kv_pairs(args.prompt_arg)
+            text = _render_prompt(args.prompt, text, **kv)
+        except Exception as e:
+            sys.stderr.write(
+                f"[pytoma:error] failed to render prompt '{args.prompt}': {e}\n"
+            )
+            return 2
 
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)

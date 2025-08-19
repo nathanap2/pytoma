@@ -257,6 +257,29 @@ You can override in `config.yml → excludes`.
 
 ---
 
+## Example: start from a **skeleton** and ask the LLM for a focused `config.yml`
+
+Goal: produce a **skeleton** of the repo (signatures/docstrings, no bodies), then wrap that snapshot in a prompt that asks the LLM to **choose a focus area** and return a minimal Pytoma `config.yml` that “expands” that area.
+
+First **Generate the prompt from the skeleton**
+
+```bash
+# The "skeleton" preset renders a compact snapshot (e.g., signatures only).
+# The "focus_to_config" prompt asks the LLM to reply with a minimal Pytoma YAML.
+pytoma . \
+  --config skeleton \
+  --prompt focus_to_config \
+  --prompt-arg 'focus_note=improve the collision engine' \
+  --out PROMPT_CFG.txt
+```
+
+`PROMPT_CFG.txt` contains a short brief + the snapshot.
+
+Now **Paste the prompt into your LLM** and retrieve a focused `config.yml` (expected shape).
+Then you can **Apply that YAML** to produce a pack “expanded” around the chosen area.
+
+---
+
 ## License
 
 [MIT](LICENCE)

@@ -1,0 +1,11 @@
+# Built-in: tidy
+default: full
+rules:
+  - match: "**.py"
+    mode: "file:tidy"
+  - match: "**.py"
+    mode: "sig+doc"
+  - match: "**.md"
+    mode: "hide"
+  - match: "**.toml"
+    mode: "hide"
