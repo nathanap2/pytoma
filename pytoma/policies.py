@@ -65,7 +65,10 @@ register_action("file:no-imports")
 # Modes (string) → Action
 # -----------------------------
 
-MODE_RE = re.compile(r"^(hide|sig|sig\+doc|full|body:levels=(\d+)|file:no-imports)$")
+MODE_RE = re.compile(
+    r"^(hide|sig|sig\+doc|full|body:levels=(\d+)"
+    r"|file:no-imports|file:no-legacy-strings|file:no-path-defs|file:no-sys-path|file:tidy)$"
+)
 
 
 def validate_mode(mode: str) -> str:
@@ -75,9 +78,6 @@ def validate_mode(mode: str) -> str:
 
 
 def to_action(mode: str) -> Action:
-    """
-    Map a user-facing string (YAML/CLI) to an Action object.
-    """
     validate_mode(mode)
     if mode == "hide":
         return hide()
@@ -89,8 +89,15 @@ def to_action(mode: str) -> Action:
         return sig_doc()
     if mode == "file:no-imports":
         return Action("file:no-imports")
+    if mode == "file:no-legacy-strings":
+        return Action("file:no-legacy-strings")
+    if mode == "file:no-path-defs":
+        return Action("file:no-path-defs")
+    if mode == "file:no-sys-path":
+        return Action("file:no-sys-path")
+    if mode == "file:tidy":
+        return Action("file:tidy")
     m = re.match(r"body:levels=(\d+)", mode)
     if m:
         return levels(int(m.group(1)))
-    # should be unreachable thanks to validate_mode
     return full()

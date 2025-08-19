@@ -1,16 +1,15 @@
 # pytoma/edits.py
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, Iterable, List
 
 from .ir import Edit
 
 
-from collections import defaultdict
-from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
 from .ir import Edit
+
+from .utils import read_text_any
 
 
 def merge_edits(edits: Iterable[Edit]) -> List[Edit]:
@@ -106,6 +105,10 @@ def _apply_edits_to_text(text: str, edits: List[Edit]) -> str:
 
 
 def apply_edits_preview(edits: Iterable[Edit]) -> Dict[Path, str]:
+    """
+    Apply edits to files, producing a preview string for each path.
+    Reads the file content with tolerant encoding detection instead of hardcoded UTF-8.
+    """
     from collections import defaultdict
 
     previews: Dict[Path, str] = {}
@@ -114,6 +117,6 @@ def apply_edits_preview(edits: Iterable[Edit]) -> Dict[Path, str]:
         by_path[Path(e.path)].append(e)
 
     for path, group in by_path.items():
-        text = path.read_text(encoding="utf-8")
+        text = read_text_any(path)  # tolerant reader
         previews[path] = _apply_edits_to_text(text, group)
     return previews

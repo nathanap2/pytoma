@@ -289,7 +289,9 @@ def build_prompt(paths: List[pathlib.Path], cfg: Config) -> str:
                 pass
 
         # Read the text once for files supported by an engine
-        text = path.read_text(encoding="utf-8")
+        from .utils import read_text_any
+
+        text = read_text_any(path)
         docs_text[path] = text
         eligible.append(path)
 

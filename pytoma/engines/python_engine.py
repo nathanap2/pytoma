@@ -2,6 +2,7 @@ from pathlib import Path, PurePosixPath
 from typing import List, Tuple, Dict, Optional
 
 import libcst as cst
+import re
 from libcst import metadata
 
 from ..ir import Document, Node, Edit, PY_MODULE, PY_CLASS, PY_FUNCTION, PY_METHOD
@@ -295,6 +296,278 @@ def _gather_top_level_import_edits_and_names(
     return delete_spans, removed
 
 
+# -------- Top-level legacy triple-quoted strings (non docstring) --------
+
+
+def _gather_top_level_legacy_strings(
+    mod: cst.Module,
+    positions: metadata.PositionProvider,
+    ls: List[int],
+) -> Tuple[List[Tuple[int, int]], int]:
+    """
+    Remove top-level string expressions that aren’t the module docstring.
+    Return (delete_spans, n_blocks).
+    """
+    delete_spans: List[Tuple[int, int]] = []
+    body = list(mod.body)
+    doc0 = _is_top_level_docstring(body[0]) if body else False
+
+    def _stmt_full_line_span(stmt: cst.SimpleStatementLine) -> Tuple[int, int]:
+        r = positions[stmt]
+        s = ls[r.start.line - 1]
+        t = ls[r.end.line]
+        return (s, t)
+
+    for idx, stmt in enumerate(body):
+        if not isinstance(stmt, cst.SimpleStatementLine) or not stmt.body:
+            continue
+        # Module docstring = the first simple string at the very beginning: keep it.
+        if idx == 0 and doc0:
+            continue
+        expr = stmt.body[0]
+        if isinstance(expr, cst.Expr) and isinstance(expr.value, cst.SimpleString):
+            delete_spans.append(_stmt_full_line_span(stmt))
+
+    return delete_spans, len(delete_spans)
+
+
+# -------- Top-level "path definitions" --------
+
+_PATH_DEF_RX = re.compile(
+    r"\b(os\.path|pathlib\.Path|__file__)\b|(^|\W)Path\s*\("  # Path(...) (often via from pathlib import Path)
+)
+
+
+def _scan_imports_flags(mod: cst.Module, code_for) -> dict:
+    """
+    Flags to make detecting ‘Path(’ safer when ‘from pathlib import Path’ is present.
+    """
+    has_from_pathlib_Path = False
+    has_pathlib = False
+    for stmt in mod.body:
+        if not isinstance(stmt, cst.SimpleStatementLine):
+            continue
+        for small in stmt.body:
+            if isinstance(small, cst.Import):
+                for alias in small.names:
+                    txt = code_for(alias.name).strip()
+                    if txt == "pathlib":
+                        has_pathlib = True
+            elif isinstance(small, cst.ImportFrom):
+                mtxt = code_for(small.module).strip() if small.module else ""
+                if mtxt == "pathlib":
+                    if isinstance(small.names, cst.ImportStar):
+                        has_from_pathlib_Path = True  # prudent: * inclut Path
+                    else:
+                        names = [code_for(a.name).strip() for a in small.names]
+                        if "Path" in names:
+                            has_from_pathlib_Path = True
+    return {"has_from_pathlib_Path": has_from_pathlib_Path, "has_pathlib": has_pathlib}
+
+
+def _gather_path_def_edits(
+    source: str,
+    path: str,
+    *,
+    mod: cst.Module,
+    positions: metadata.PositionProvider,
+    ls: List[int],
+) -> Tuple[List[Edit], List[str]]:
+    """
+    Detect top-level assignments whose RHS looks like a path definition.
+    Return (edits_deletion, removed_var_names)
+    """
+    code_for = lambda node: _code_for(mod, node)
+    flags = _scan_imports_flags(mod, code_for)
+
+    def _stmt_line_span(stmt: cst.SimpleStatementLine) -> Tuple[int, int]:
+        r = positions[stmt]
+        s = ls[r.start.line - 1]
+        t = ls[r.end.line]
+        return (s, t)
+
+    removed: List[str] = []
+    deletions: List[Edit] = []
+
+    def _value_matches(value: cst.CSTNode) -> bool:
+        txt = code_for(value).strip()
+        if not txt:
+            return False
+        if _PATH_DEF_RX.search(txt):
+            # If we have Path(...), ensure Path really comes from pathlib (when possible).
+            if re.search(r"(^|\W)Path\s*\(", txt) and not (
+                flags["has_from_pathlib_Path"] or flags["has_pathlib"]
+            ):
+                # too aggressive if ‘Path’ hasn’t been imported.
+                return False
+            return True
+        return False
+
+    def _collect_names_from_assign(assign: cst.Assign) -> List[str]:
+        out: List[str] = []
+        for targ in getattr(assign, "targets", []) or []:
+            t = getattr(targ, "target", None)
+            if t is not None:
+                out.append(code_for(t).strip())
+        return out
+
+    for stmt in mod.body:
+        if not isinstance(stmt, cst.SimpleStatementLine):
+            continue
+        any_hit = False
+
+        for small in stmt.body:
+            if isinstance(small, cst.Assign):
+                if _value_matches(small.value):
+                    removed.extend(_collect_names_from_assign(small))
+                    any_hit = True
+            elif isinstance(small, cst.AnnAssign):
+                if small.value and _value_matches(small.value):
+                    name_txt = code_for(small.target).strip()
+                    if name_txt:
+                        removed.append(name_txt)
+                    any_hit = True
+
+        if any_hit:
+            s, t = _stmt_line_span(stmt)
+            deletions.append(Edit(path=path, span=(s, t), replacement=""))
+
+    return deletions, removed
+
+
+# -------- Top-level sys.path manipulations --------
+
+
+def _gather_sys_path_edits(
+    source: str,
+    path: str,
+    *,
+    mod: cst.Module,
+    positions: metadata.PositionProvider,
+    ls: List[int],
+) -> Tuple[List[Edit], List[str]]:
+    """
+    Remove:
+      - sys.path.append/insert/extend(...)
+      - Assign / AugAssign on sys.path
+      - Return (edits_deletion, descriptions).
+    """
+    code_for = lambda node: _code_for(mod, node)
+
+    def _stmt_line_span(stmt: cst.SimpleStatementLine) -> Tuple[int, int]:
+        r = positions[stmt]
+        s = ls[r.start.line - 1]
+        t = ls[r.end.line]
+        return (s, t)
+
+    deletions: List[Edit] = []
+    descs: List[str] = []
+
+    def _is_sys_path_attr(node: cst.CSTNode) -> bool:
+        if isinstance(node, cst.Attribute) and isinstance(node.value, cst.Attribute):
+            v = node.value
+            return (
+                isinstance(v.value, cst.Name)
+                and v.value.value == "sys"
+                and isinstance(v.attr, cst.Name)
+                and v.attr.value == "path"
+            )
+        if isinstance(node, cst.Attribute):
+            # textual fallback
+            return code_for(node).strip().startswith("sys.path")
+        return False
+
+    for stmt in mod.body:
+        if not isinstance(stmt, cst.SimpleStatementLine):
+            continue
+
+        any_hit = False
+
+        for small in stmt.body:
+            # sys.path.append/insert/extend(...)
+            if isinstance(small, cst.Expr) and isinstance(small.value, cst.Call):
+                f = small.value.func
+                if isinstance(f, cst.Attribute) and _is_sys_path_attr(f.value):
+                    m = isinstance(f.attr, cst.Name) and f.attr.value in {
+                        "append",
+                        "insert",
+                        "extend",
+                    }
+                    if m:
+                        any_hit = True
+                        descs.append(code_for(f).strip() + "(...)")
+            # Assign sys.path = ...
+            elif isinstance(small, cst.Assign):
+                for targ in small.targets:
+                    if _is_sys_path_attr(getattr(targ, "target", None)):
+                        any_hit = True
+                        descs.append("sys.path = …")
+            # sys.path += [...]
+            elif isinstance(small, cst.AugAssign):
+                if _is_sys_path_attr(small.target):
+                    any_hit = True
+                    descs.append("sys.path " + code_for(small.operator).strip() + "= …")
+
+        if any_hit:
+            s, t = _stmt_line_span(stmt)
+            deletions.append(Edit(path=path, span=(s, t), replacement=""))
+
+    return deletions, descs
+
+
+def _insert_markers_for_cleanup(
+    source: str,
+    path: str,
+    *,
+    mod: cst.Module,
+    positions: metadata.PositionProvider,
+    ls: List[int],
+    imports_removed: List[str] | None = None,
+    sys_path_descs: List[str] | None = None,
+    path_vars_removed: List[str] | None = None,
+    legacy_blocks_count: int = 0,
+) -> List[Edit]:
+    """
+    Build markers at the same insertion point used for imports (after the shebang, docstring, futures, imports, then blank lines).
+    The insertion order is deterministic.
+    """
+    inserts: List[Edit] = []
+    insert_pos = _compute_marker_insert_pos_cst(source, mod, positions, ls)
+
+    # 1) Imports – if provided (otherwise _drop_top_level_imports_with_marker_cst will do it).
+    if imports_removed:
+        txt = _format_imports_marker(imports_removed, mode="list") + "\n"
+        inserts.append(Edit(path=path, span=(insert_pos, insert_pos), replacement=txt))
+
+    def _fmt_list(tag: str, items: List[str], max_items: int = 4) -> str:
+        items = sorted(dict.fromkeys(items))
+        head = f"# [{tag}: {len(items)}]"
+        if not items:
+            return head + "\n"
+        sample = ", ".join(items[:max_items])
+        if len(items) > max_items:
+            sample += f"…(+{len(items) - max_items})"
+        return f"{head} {sample}\n"
+
+    # 2) sys.path
+    if sys_path_descs:
+        txt = _fmt_list("sys.path tweaks omitted", sys_path_descs)
+        inserts.append(Edit(path=path, span=(insert_pos, insert_pos), replacement=txt))
+
+    # 3) path defs
+    if path_vars_removed:
+        txt = _fmt_list("path setup omitted", path_vars_removed)
+        inserts.append(Edit(path=path, span=(insert_pos, insert_pos), replacement=txt))
+
+    # 4) legacy strings
+    if legacy_blocks_count:
+        unit = "block" if legacy_blocks_count == 1 else "blocks"
+        txt = f"# [legacy strings omitted: {legacy_blocks_count} {unit}]\n"
+        inserts.append(Edit(path=path, span=(insert_pos, insert_pos), replacement=txt))
+
+    return inserts
+
+
 def _drop_top_level_imports_with_marker_cst(
     source: str,
     path: str,
@@ -519,18 +792,34 @@ class PythonEngine:
         return (
             _mode_of_action(action) in {"full", "hide", "sig", "sig+doc"}
             or action.kind == "levels"
-            or action.kind in {"file:no-imports"}
+            or action.kind
+            in {
+                "file:no-imports",
+                "file:no-legacy-strings",
+                "file:no-path-defs",
+                "file:no-sys-path",
+                "file:tidy",
+            }
         )
 
     def render(self, doc: Document, decisions: List[Tuple[Node, Action]]) -> List[Edit]:
-        # Reuse the analysis stored by parse() — no double parsing
+        """
+        Interprets the decisions (node, action) into a list of Edits for a Python document.
+        - Handles file-level actions:
+            * file:no-imports
+            * file:no-legacy-strings
+            * file:no-path-defs
+            * file:no-sys-path
+            * file:tidy (composite of the three above + no-imports)
+        - Handles node-level actions: hide / sig / sig+doc / body:levels=k
+        """
+        # --------- Retrieve the analysis produced by parse() (no re-parse) ---------
         analysis: Dict[str, object] = {}
         for r in doc.roots:
             if r.kind == PY_MODULE and (r.meta or {}).get("analysis"):
                 analysis = r.meta["analysis"]  # type: ignore[assignment]
                 break
 
-        # Defensive fallbacks for compatibility (should rarely trigger)
         if analysis:
             src: List[str] = analysis.get("src_lines") or doc.text.splitlines(keepends=True)  # type: ignore[assignment]
             ls: List[int] = analysis.get("line_starts") or line_starts(doc.text)  # type: ignore[assignment]
@@ -538,33 +827,107 @@ class PythonEngine:
             cst_mod: Optional[cst.Module] = analysis.get("cst_module")  # type: ignore[assignment]
             posmap: Optional[metadata.PositionProvider] = analysis.get("posmap")  # type: ignore[assignment]
         else:
-            # Old behavior (fallback): minimal re-parse
+            # Defensive fallback: minimal re-parsing if analysis is not available.
             src, funcs, cst_mod, posmap = _collect_funcs(doc.text, Path(doc.path))
             ls = line_starts(doc.text)
             by_qual = {fi.qualname: fi for fi in funcs}
 
         candidates: List[Edit] = []
+
+        # --------- Interpretation of decisions ---------
         for node, action in decisions:
-            # --- file-level filters ---
+            # =========================
+            # 1) File-level filters
+            # =========================
             if node.kind == PY_MODULE and action.kind == "file:no-imports":
                 if cst_mod is not None and posmap is not None:
                     candidates.extend(
                         _drop_top_level_imports_with_marker_cst(
-                            doc.text,
-                            doc.path,
-                            mod=cst_mod,
-                            positions=posmap,
-                            ls=ls,
+                            doc.text, doc.path, mod=cst_mod, positions=posmap, ls=ls
                         )
                     )
                 continue
 
+            if node.kind == PY_MODULE and action.kind in {
+                "file:no-legacy-strings",
+                "file:no-path-defs",
+                "file:no-sys-path",
+                "file:tidy",
+            }:
+                # If CST analysis is not available, do not attempt anything (best-effort).
+                if cst_mod is None or posmap is None:
+                    continue
+
+                # 1) Imports (only for 'tidy'; otherwise leave the dedicated rule handle it)
+                imports_del: List[Edit] = []
+                imports_removed: List[str] = []
+                if action.kind == "file:tidy":
+                    spans, imports_removed = _gather_top_level_import_edits_and_names(
+                        cst_mod, posmap, ls
+                    )
+                    imports_del = [
+                        Edit(path=doc.path, span=sp, replacement="") for sp in spans
+                    ]
+
+                # 2) sys.path tweaks
+                sys_del: List[Edit] = []
+                sys_descs: List[str] = []
+                if action.kind in {"file:no-sys-path", "file:tidy"}:
+                    sys_del, sys_descs = _gather_sys_path_edits(
+                        doc.text, doc.path, mod=cst_mod, positions=posmap, ls=ls
+                    )
+
+                # 3) Path defs
+                path_del: List[Edit] = []
+                path_vars: List[str] = []
+                if action.kind in {"file:no-path-defs", "file:tidy"}:
+                    path_del, path_vars = _gather_path_def_edits(
+                        doc.text, doc.path, mod=cst_mod, positions=posmap, ls=ls
+                    )
+
+                # 4) Legacy triple-quoted strings (top-level, outside of module docstring)
+                legacy_del_spans: List[Tuple[int, int]] = []
+                legacy_count = 0
+                if action.kind in {"file:no-legacy-strings", "file:tidy"}:
+                    legacy_del_spans, legacy_count = _gather_top_level_legacy_strings(
+                        cst_mod, posmap, ls
+                    )
+                legacy_del = [
+                    Edit(path=doc.path, span=sp, replacement="")
+                    for sp in legacy_del_spans
+                ]
+
+                # 5) Header markers (common and stable insertion point)
+                markers = _insert_markers_for_cleanup(
+                    doc.text,
+                    doc.path,
+                    mod=cst_mod,
+                    positions=posmap,
+                    ls=ls,
+                    imports_removed=imports_removed
+                    if action.kind == "file:tidy"
+                    else None,
+                    sys_path_descs=sys_descs if sys_del else None,
+                    path_vars_removed=path_vars if path_del else None,
+                    legacy_blocks_count=legacy_count if legacy_del else 0,
+                )
+
+                candidates.extend(imports_del)
+                candidates.extend(sys_del)
+                candidates.extend(path_del)
+                candidates.extend(legacy_del)
+                candidates.extend(markers)
+                continue
+
+            # =========================
+            # 2) Actions on nodes (classes / functions / methods)
+            # =========================
             mode = _mode_of_action(action)
             if not mode or mode == "full":
                 continue
 
+            # --- Entire module ---
             if node.kind == PY_MODULE and mode == "hide":
-                # Mark omission of the entire module
                 marker = make_omission_line(
                     "py",
                     1,
@@ -578,47 +941,46 @@ class PythonEngine:
                 )
                 continue
 
+            # --- Classes ---
             if node.kind == PY_CLASS:
                 if mode == "hide":
-                    # Compute the line range of the class
                     s, t = node.span
                     before = doc.text[:s]
                     omitted_text = doc.text[s:t]
                     start_line = before.count("\n") + 1
                     end_line = start_line + omitted_text.count("\n")
-                    indent = (
-                        ""  # could be refined by reusing the indent of the first line
+                    label = (
+                        f"class {node.name} omitted" if node.name else "class omitted"
                     )
                     marker = make_omission_line(
                         "py",
                         start_line,
                         end_line,
-                        indent=indent,
+                        indent="",
                         opts=DEFAULT_OPTIONS,
-                        label=f"class {node.name} omitted"
-                        if node.name
-                        else "class omitted",
+                        label=label,
                     )
                     candidates.append(
                         Edit(path=doc.path, span=node.span, replacement=marker)
                     )
-                continue
+                continue  # (other modes do not apply to the class block itself)
 
+            # --- Functions / Methods ---
             if node.kind in {PY_FUNCTION, PY_METHOD}:
                 fi = by_qual.get(node.qual or "")
                 if not fi:
+                    # Fallback if function index failed: properly hide
                     if mode == "hide":
                         s, t = node.span
                         before = doc.text[:s]
                         omitted_text = doc.text[s:t]
                         start_line = before.count("\n") + 1
                         end_line = start_line + omitted_text.count("\n")
-                        indent = ""
                         marker = make_omission_line(
                             "py",
                             start_line,
                             end_line,
-                            indent=indent,
+                            indent="",
                             opts=DEFAULT_OPTIONS,
                             label="definition omitted",
                         )
@@ -633,8 +995,11 @@ class PythonEngine:
                 a_ln, b_ln, block = rep
                 span = _line_span_to_char_span(ls, a_ln, b_ln)
                 candidates.append(Edit(path=doc.path, span=span, replacement=block))
+                continue
 
-        # No deduplication/pruning here: delegate to fs.merge_edits
+            # Other Python nodes: nothing to do
+
+        # No deduplication here: merge_edits() upstream takes care of the rest
         return candidates
 
 

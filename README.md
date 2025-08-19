@@ -153,6 +153,18 @@ Note : when Pytoma walks each document’s nodes, it decides a policy with this 
 * `sig+doc` — header + docstring (or `"""…"""` placeholder), body omitted.
 * `body:levels=k` — keep code with indentation ≤ `base + 4*k`, collapse deeper blocks with markers.
 * `file:no-imports` — strip top-level `import`/`from … import …` except `from __future__ import …`.
+* `file:no-legacy-strings` — remove **top-level** triple-quoted strings that are
+  **not** the module docstring. These are often used to “comment out” legacy code blocks.
+* `file:no-path-defs` — remove or condense **top-level** path-setup assignments
+  (RHS matching `os.path.*`, `pathlib.Path(...)`, `__file__`, or `Path(...)` when
+  imported from `pathlib`). A compact marker summarizes a few removed variables.
+* `file:no-sys-path` — remove `sys.path` manipulations (`append`, `insert`, `extend`),
+  direct assignments (`sys.path = ...`), and in-place updates (`sys.path += ...`).
+* `file:tidy` — **composite** cleaner that applies `file:no-imports`,
+  `file:no-legacy-strings`, `file:no-path-defs`, and `file:no-sys-path`
+  in one pass. Recommended when you want several file-level cleaners on the
+  same file, since only one `file:*` rule is applied per file rule.
+
 
 Markers are comment-style lines (or a light box) with line counts, e.g.:
 
@@ -209,6 +221,8 @@ You can override in `config.yml → excludes`.
 
 - **Rule order can still be tricky** when several rules are about the same file. I'm looking forward to improving that soon. For the moment, prefer being as explicit as possible, and for tricky setups, you can simply ask an LLM to draft the rules for you (from your repo tree and goals).
 - To name a markdown section in the config file, you still **need to give the slugified version** of the section
+- **Only one `file:*` action per rule target.** If you need to combine cleaners (imports + sys.path + path vars + legacy strings), prefer `file:tidy` instead of stacking multiple `file:*` rules on the same files.
+
 
 ## Roadmap
 
